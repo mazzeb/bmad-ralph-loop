@@ -80,4 +80,4 @@ pytest tests/ -v
 
 - Python >= 3.10
 - `claude` CLI installed and authenticated
-- Project with `PROMPT-create-story.md`, `PROMPT-dev-story.md`, `PROMPT-code-review.md`, and `sprint-status.yaml`
+- Project with `sprint-status.yaml` (prompt templates are bundled in this package)

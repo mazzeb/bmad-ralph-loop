@@ -10,9 +10,7 @@ Runs the full BMAD story implementation cycle unattended using Claude Code CLI s
 | `run-stories` | Wrapper script — delegates to the Python package via `uv` |
 | `run_stories/` | Python TUI Story Runner package |
 | `pyproject.toml` | Python project config (dependencies, entry point, build system) |
-| `PROMPT-create-story.md` | Prompt for the Create Story (CS) step |
-| `PROMPT-dev-story.md` | Prompt for the Dev Story (DS) step |
-| `PROMPT-code-review.md` | Prompt for the Code Review (CR) step |
+| `run_stories/PROMPT-*.md` | Prompt templates for each step (CS, DS, CR) |
 
 ## Prerequisites
 
@@ -52,9 +50,8 @@ git clone <this-repo> bmad-ralph-loop
 ```
 
 The install script copies everything needed into your project root:
-- `PROMPT-*.md` files
-- `run_stories/` Python package and `pyproject.toml`
-- `run-stories` wrapper script
+- `run_stories/` Python package (includes prompt templates)
+- `pyproject.toml` and `run-stories` wrapper script
 
 ### Option B: Standalone
 

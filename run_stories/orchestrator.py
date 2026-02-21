@@ -37,9 +37,10 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
     impl_dir = project_dir / "_bmad-output" / "implementation-artifacts"
     log_dir = impl_dir / "logs"
 
-    prompt_cs = project_dir / "PROMPT-create-story.md"
-    prompt_ds = project_dir / "PROMPT-dev-story.md"
-    prompt_cr = project_dir / "PROMPT-code-review.md"
+    pkg_dir = Path(__file__).resolve().parent
+    prompt_cs = pkg_dir / "PROMPT-create-story.md"
+    prompt_ds = pkg_dir / "PROMPT-dev-story.md"
+    prompt_cr = pkg_dir / "PROMPT-code-review.md"
 
     # --- Preflight checks ---
     if not shutil.which("claude"):

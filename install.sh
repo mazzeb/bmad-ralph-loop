@@ -10,7 +10,7 @@ if ! command -v uv >/dev/null 2>&1; then
   exit 1
 fi
 
-for f in pyproject.toml run_stories/cli.py; do
+for f in pyproject.toml run_stories/cli.py run_stories/PROMPT-create-story.md; do
   if [[ ! -f "$SCRIPT_DIR/$f" ]]; then
     echo "Error: expected '$f' in $SCRIPT_DIR — is this the bmad-ralph-loop repo?" >&2
     exit 1
@@ -31,18 +31,10 @@ fi
 echo "Installing bmad-ralph-loop into: $TARGET_DIR"
 echo "  Source: $SCRIPT_DIR"
 
-# --- Copy prompt files --------------------------------------------------------
-
-PROMPTS=(PROMPT-create-story.md PROMPT-dev-story.md PROMPT-code-review.md)
-for p in "${PROMPTS[@]}"; do
-  cp "$SCRIPT_DIR/$p" "$TARGET_DIR/$p"
-  echo "  Copied $p"
-done
-
 # --- Copy Python package and project config -----------------------------------
 
 cp -r "$SCRIPT_DIR/run_stories" "$TARGET_DIR/run_stories"
-echo "  Copied run_stories/"
+echo "  Copied run_stories/ (includes prompt files)"
 
 cp "$SCRIPT_DIR/pyproject.toml" "$TARGET_DIR/pyproject.toml"
 echo "  Copied pyproject.toml"
