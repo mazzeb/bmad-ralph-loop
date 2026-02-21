@@ -263,7 +263,7 @@ for i in $(seq 1 "$MAX_STORIES"); do
     fi
 
     # Check for HALT
-    if jq -e 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text | test("^HALT:")' "$LOG_DS" &>/dev/null; then
+    if jq -e 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text | test("<HALT>")' "$LOG_DS" &>/dev/null; then
       echo "Dev Story HALTed. Check log: $LOG_DS"
       break 2
     fi

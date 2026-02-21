@@ -20,7 +20,7 @@ You are executing the BMAD create-story workflow in fully autonomous YOLO mode. 
 
 ## Autonomous Constraints
 
-- If no backlog stories exist in sprint-status.yaml, output exactly `NO_BACKLOG_STORIES` and stop.
-- If a HALT condition triggers that cannot be resolved autonomously, output `HALT: <reason>` and stop.
+- If no backlog stories exist in sprint-status.yaml, output exactly `<NO_BACKLOG_STORIES/>` and stop.
+- If a HALT condition triggers that cannot be resolved autonomously, output `<HALT>reason</HALT>` and stop.
 - Do NOT commit to git — the orchestration script handles commits.
-- After creating the story file and updating sprint-status.yaml, output `CREATE_STORY_COMPLETE: <story-key>` as the last line.
+- After creating the story file and updating sprint-status.yaml, output `<CREATE_STORY_COMPLETE>story-key</CREATE_STORY_COMPLETE>` as the last line.

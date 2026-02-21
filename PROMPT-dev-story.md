@@ -20,7 +20,7 @@ You are executing the BMAD dev-story workflow in fully autonomous YOLO mode. No 
 
 ## Autonomous Constraints
 
-- If no ready-for-dev stories exist and no STORY_PATH is provided, output `NO_READY_STORIES` and stop.
-- If a HALT condition triggers that cannot be resolved autonomously, output `HALT: <reason>` and stop.
+- If no ready-for-dev stories exist and no STORY_PATH is provided, output `<NO_READY_STORIES/>` and stop.
+- If a HALT condition triggers that cannot be resolved autonomously, output `<HALT>reason</HALT>` and stop.
 - Do NOT commit to git — the orchestration script handles commits.
-- After completing all tasks and setting status to "review", output `DEV_STORY_COMPLETE: <story-key>` as the last line.
+- After completing all tasks and setting status to "review", output `<DEV_STORY_COMPLETE>story-key</DEV_STORY_COMPLETE>` as the last line.

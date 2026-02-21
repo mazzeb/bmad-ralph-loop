@@ -23,6 +23,6 @@ You are executing the BMAD code-review workflow in fully autonomous YOLO mode. N
 - Find the story in `review` status from sprint-status.yaml, or use the STORY_PATH if provided.
 - Do NOT commit to git — the orchestration script handles commits.
 - After completing the review, output one of:
-  - `CODE_REVIEW_APPROVED: <story-key>` — if story status is now `done`
-  - `CODE_REVIEW_ISSUES: <story-key>` — if issues remain and story is `in-progress`
-  - `HALT: <reason>` — if a blocking problem was encountered
+  - `<CODE_REVIEW_APPROVED>story-key</CODE_REVIEW_APPROVED>` — if story status is now `done`
+  - `<CODE_REVIEW_ISSUES>story-key</CODE_REVIEW_ISSUES>` — if issues remain and story is `in-progress`
+  - `<HALT>reason</HALT>` — if a blocking problem was encountered
