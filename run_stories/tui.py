@@ -200,6 +200,19 @@ class Dashboard:
         self._story_start = story_start
         self._total_start = total_start
 
+    def freeze_timers(self) -> None:
+        """Freeze all timers at their current values by clearing anchors."""
+        now = time.monotonic()
+        if self._step_start > 0:
+            self.step_elapsed = now - self._step_start
+        if self._story_start > 0:
+            self.story_elapsed = now - self._story_start
+        if self._total_start > 0:
+            self.total_elapsed = now - self._total_start
+        self._step_start = 0
+        self._story_start = 0
+        self._total_start = 0
+
     def update_sprint_stats(
         self,
         total_epics: int,
@@ -404,6 +417,7 @@ class StoryRunnerApp(App):
             self._exit_code = 1
         finally:
             self._finished = True
+            self._tui.dashboard.freeze_timers()
             self._tui.dashboard.countdown_message = "Finished -- press Enter to close"
 
     def action_close_if_finished(self) -> None:
