@@ -1,4 +1,4 @@
-"""Two-pane TUI using Textual: activity log (top 70%) + orchestration dashboard (bottom 30%)."""
+"""Two-pane TUI using Textual: activity log (top, fills remaining space) + orchestration dashboard (bottom, auto-sized to content)."""
 
 from __future__ import annotations
 
@@ -330,7 +330,7 @@ class TUI:
 class ActivityLogWidget(Static):
     """Textual widget wrapping ActivityLog for display with mouse scroll support."""
 
-    DEFAULT_CSS = "ActivityLogWidget { height: 7fr; border: solid blue; border-title-align: center; }"
+    DEFAULT_CSS = "ActivityLogWidget { height: 1fr; border: solid blue; border-title-align: center; }"
     BORDER_TITLE = "Activity Log"
 
     def __init__(self, activity_log: ActivityLog) -> None:
@@ -352,7 +352,7 @@ class ActivityLogWidget(Static):
 class DashboardWidget(Static):
     """Textual widget wrapping Dashboard for display."""
 
-    DEFAULT_CSS = "DashboardWidget { height: 3fr; border: solid green; border-title-align: center; }"
+    DEFAULT_CSS = "DashboardWidget { height: auto; max-height: 50%; border: solid green; border-title-align: center; }"
     BORDER_TITLE = "Dashboard"
 
     def __init__(self, dashboard: Dashboard) -> None:
