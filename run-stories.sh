@@ -139,6 +139,7 @@ ${extra_prompt}"
     claude
     -p "$prompt_content"
     --max-turns "$max_turns"
+    --output-format stream-json
     --dangerously-skip-permissions
   )
 
@@ -147,9 +148,14 @@ ${extra_prompt}"
   fi
 
   set +e
-  "${cmd[@]}" 2>&1 | tee "$log_file"
+  "${cmd[@]}" > "$log_file" 2>&1
   local exit_code=${PIPESTATUS[0]}
   set -e
+
+  # Print the final assistant text to stdout for terminal visibility
+  if command -v jq &> /dev/null && [[ -f "$log_file" ]]; then
+    jq -r 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text' "$log_file" 2>/dev/null | tail -1
+  fi
 
   return $exit_code
 }
@@ -257,7 +263,7 @@ for i in $(seq 1 "$MAX_STORIES"); do
     fi
 
     # Check for HALT
-    if grep -q "^HALT:" "$LOG_DS"; then
+    if jq -e 'select(.type == "assistant") | .message.content[]? | select(.type == "text") | .text | test("^HALT:")' "$LOG_DS" &>/dev/null; then
       echo "Dev Story HALTed. Check log: $LOG_DS"
       break 2
     fi
