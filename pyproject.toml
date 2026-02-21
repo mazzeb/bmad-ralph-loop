@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "run-stories"
+version = "0.1.0"
+description = "Python TUI Story Runner for BMAD workflow"
+requires-python = ">=3.10"
+dependencies = [
+    "rich>=13.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+]
+
+[project.scripts]
+run-stories = "run_stories.cli:main"
