@@ -1,0 +1,28 @@
+installation:
+  version: 6.0.1
+  installDate: 2026-02-21T09:49:06.166Z
+  lastUpdated: 2026-02-21T09:49:06.166Z
+modules:
+  - name: core
+    version: 6.0.1
+    installDate: 2026-02-21T09:49:05.916Z
+    lastUpdated: 2026-02-21T09:49:05.916Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: bmm
+    version: 6.0.1
+    installDate: 2026-02-21T09:49:02.955Z
+    lastUpdated: 2026-02-21T09:49:05.916Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: tea
+    version: 1.2.2
+    installDate: 2026-02-21T09:49:04.842Z
+    lastUpdated: 2026-02-21T09:49:06.166Z
+    source: external
+    npmPackage: bmad-method-test-architecture-enterprise
+    repoUrl: https://github.com/bmad-code-org/bmad-method-test-architecture-enterprise
+ides:
+  - claude-code
