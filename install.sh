@@ -31,13 +31,13 @@ fi
 echo "Installing bmad-ralph-loop into: $TARGET_DIR"
 echo "  Source: $SCRIPT_DIR"
 
-# --- Copy Python package and project config -----------------------------------
+# --- Copy Python package and project config into .run-stories/ ----------------
 
-cp -r "$SCRIPT_DIR/run_stories" "$TARGET_DIR/run_stories"
-echo "  Copied run_stories/ (includes prompt files)"
-
-cp "$SCRIPT_DIR/pyproject.toml" "$TARGET_DIR/pyproject.toml"
-echo "  Copied pyproject.toml"
+rm -rf "$TARGET_DIR/.run-stories"
+mkdir -p "$TARGET_DIR/.run-stories"
+cp -r "$SCRIPT_DIR/run_stories" "$TARGET_DIR/.run-stories/run_stories"
+cp "$SCRIPT_DIR/pyproject.toml" "$TARGET_DIR/.run-stories/pyproject.toml"
+echo "  Copied .run-stories/ (run_stories package + pyproject.toml)"
 
 # --- Copy run-stories wrapper -------------------------------------------------
 

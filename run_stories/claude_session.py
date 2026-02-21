@@ -66,6 +66,7 @@ async def run_claude_session(
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.STDOUT,
         cwd=project_dir,
+        limit=10 * 1024 * 1024,  # 10 MB – stream-json lines can be very long
     )
     _active_process = proc
 

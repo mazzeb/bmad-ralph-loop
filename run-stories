@@ -1,3 +1,8 @@
 #!/usr/bin/env bash
 command -v uv >/dev/null 2>&1 || { echo "Error: 'uv' is required but not found. See https://docs.astral.sh/uv/" >&2; exit 1; }
-exec uv run run-stories "$@"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+if [[ -d "$SCRIPT_DIR/.run-stories" ]]; then
+  exec uv run --project "$SCRIPT_DIR/.run-stories" run-stories "$@"
+else
+  exec uv run run-stories "$@"
+fi
