@@ -29,17 +29,7 @@ if [[ "$TARGET_DIR" == "$SCRIPT_DIR" ]]; then
 fi
 
 echo "Installing bmad-ralph-loop into: $TARGET_DIR"
-echo "  Package source: $SCRIPT_DIR"
-
-# --- Compute relative path from target to this package ------------------------
-
-relpath() {
-  # Compute relative path from $1 to $2 using python (portable)
-  python3 -c "import os.path; print(os.path.relpath('$2', '$1'))"
-}
-
-REL_PATH="$(relpath "$TARGET_DIR" "$SCRIPT_DIR")"
-echo "  Relative path:  $REL_PATH"
+echo "  Source: $SCRIPT_DIR"
 
 # --- Copy prompt files --------------------------------------------------------
 
@@ -49,16 +39,19 @@ for p in "${PROMPTS[@]}"; do
   echo "  Copied $p"
 done
 
-# --- Generate run-stories wrapper ---------------------------------------------
+# --- Copy Python package and project config -----------------------------------
 
-WRAPPER="$TARGET_DIR/run-stories"
-cat > "$WRAPPER" <<EOF
-#!/usr/bin/env bash
-command -v uv >/dev/null 2>&1 || { echo "Error: 'uv' is required but not found. See https://docs.astral.sh/uv/" >&2; exit 1; }
-exec uv run --project "\$(dirname "\$0")/$REL_PATH" run-stories "\$@"
-EOF
-chmod +x "$WRAPPER"
-echo "  Created run-stories wrapper"
+cp -r "$SCRIPT_DIR/run_stories" "$TARGET_DIR/run_stories"
+echo "  Copied run_stories/"
+
+cp "$SCRIPT_DIR/pyproject.toml" "$TARGET_DIR/pyproject.toml"
+echo "  Copied pyproject.toml"
+
+# --- Copy run-stories wrapper -------------------------------------------------
+
+cp "$SCRIPT_DIR/run-stories" "$TARGET_DIR/run-stories"
+chmod +x "$TARGET_DIR/run-stories"
+echo "  Copied run-stories"
 
 # --- Done ---------------------------------------------------------------------
 

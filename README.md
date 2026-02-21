@@ -51,9 +51,10 @@ git clone <this-repo> bmad-ralph-loop
 ./bmad-ralph-loop/install.sh          # target defaults to parent dir (your project root)
 ```
 
-The install script:
-- Copies the `PROMPT-*.md` files to your project root
-- Creates a `run-stories` wrapper that invokes the package via `uv run --project`
+The install script copies everything needed into your project root:
+- `PROMPT-*.md` files
+- `run_stories/` Python package and `pyproject.toml`
+- `run-stories` wrapper script
 
 ### Option B: Standalone
 
