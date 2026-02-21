@@ -24,13 +24,37 @@ def get_story_status(data: dict, key: str) -> str:
     return str(dev_status.get(key, "unknown"))
 
 
-def next_backlog_story(data: dict) -> str | None:
-    """Return the first story key with status 'backlog', or None."""
+def next_actionable_story(data: dict) -> tuple[str, str] | None:
+    """Return the highest-priority in-progress story as (key, status_string).
+
+    Priority order: in-progress > review > ready-for-dev > backlog.
+    Returns None if no actionable stories exist.
+    """
     dev_status = data.get("development_status", {})
-    for key, status in dev_status.items():
-        if re.match(r"\d+-\d+-", str(key)) and str(status) == "backlog":
-            return str(key)
+    for target_status in ("in-progress", "review", "ready-for-dev", "backlog"):
+        for key, status in dev_status.items():
+            if re.match(r"\d+-\d+-", str(key)) and str(status) == target_status:
+                return (str(key), target_status)
     return None
+
+
+def find_done_stories(data: dict) -> list[str]:
+    """Return all story keys with status 'done', sorted by (epic, story) descending."""
+    dev_status = data.get("development_status", {})
+    done_keys: list[str] = []
+    for key, status in dev_status.items():
+        if re.match(r"\d+-\d+-", str(key)) and str(status) == "done":
+            done_keys.append(str(key))
+
+    def _sort_key(k: str) -> tuple[int, int]:
+        parts = k.split("-")
+        try:
+            return (int(parts[0]), int(parts[1]))
+        except (ValueError, IndexError):
+            return (0, 0)
+
+    done_keys.sort(key=_sort_key, reverse=True)
+    return done_keys
 
 
 def story_id_from_key(key: str) -> str:
