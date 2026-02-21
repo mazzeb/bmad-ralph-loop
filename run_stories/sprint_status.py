@@ -66,16 +66,32 @@ def story_id_from_key(key: str) -> str:
 
 
 def count_epics(data: dict) -> tuple[int, int]:
-    """Return (total_epics, done_epics) from sprint status data."""
+    """Return (total_epics, done_epics) from sprint status data.
+
+    An epic counts as done when all its stories have status 'done',
+    regardless of the epic-N status field or the optional retrospective.
+    Epics with no stories are not counted as done.
+    """
     dev_status = data.get("development_status", {})
-    total = 0
+
+    # Collect epic numbers
+    epic_nums: list[int] = []
+    for key in dev_status:
+        m = re.match(r"epic-(\d+)$", str(key))
+        if m:
+            epic_nums.append(int(m.group(1)))
+
+    total = len(epic_nums)
     done = 0
-    for key, status in dev_status.items():
-        # $ anchor excludes "epic-1-retrospective" keys
-        if re.match(r"epic-\d+$", str(key)):
-            total += 1
-            if str(status) == "done":
-                done += 1
+    for n in epic_nums:
+        stories = [
+            (k, str(v))
+            for k, v in dev_status.items()
+            if re.match(rf"{n}-\d+-.+", str(k))
+        ]
+        if stories and all(status == "done" for _, status in stories):
+            done += 1
+
     return total, done
 
 

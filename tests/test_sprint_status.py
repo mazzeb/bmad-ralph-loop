@@ -41,9 +41,44 @@ class TestCountEpics:
         assert done == 0
 
     def test_no_done_epics(self):
-        data = {"development_status": {"epic-1": "backlog", "epic-2": "in-progress"}}
+        data = {"development_status": {
+            "epic-1": "backlog",
+            "1-1-foo": "backlog",
+            "epic-2": "in-progress",
+            "2-1-bar": "review",
+        }}
         total, done = count_epics(data)
         assert total == 2
+        assert done == 0
+
+    def test_epic_done_when_all_stories_done_despite_epic_status(self):
+        """Epic counts as done when all its stories are done, even if epic-N is not 'done'."""
+        data = {"development_status": {
+            "epic-1": "in-progress",
+            "1-1-auth": "done",
+            "1-2-mgmt": "done",
+            "epic-1-retrospective": "optional",
+        }}
+        total, done = count_epics(data)
+        assert total == 1
+        assert done == 1
+
+    def test_epic_not_done_when_some_stories_incomplete(self):
+        """Epic with a mix of done and non-done stories is not counted as done."""
+        data = {"development_status": {
+            "epic-1": "in-progress",
+            "1-1-auth": "done",
+            "1-2-mgmt": "review",
+        }}
+        total, done = count_epics(data)
+        assert total == 1
+        assert done == 0
+
+    def test_epic_not_done_with_no_stories(self):
+        """Epic with no stories should not count as done."""
+        data = {"development_status": {"epic-1": "done"}}
+        total, done = count_epics(data)
+        assert total == 1
         assert done == 0
 
 
