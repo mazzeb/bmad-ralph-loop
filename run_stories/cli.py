@@ -3,19 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
-import signal
 import sys
-import time
 from pathlib import Path
 
-from rich.console import Console
-from rich.live import Live
-
-from .claude_session import cleanup_subprocess
 from .models import SessionConfig
-from .orchestrator import run_stories
-from .tui import TUI
+from .tui import TUI, StoryRunnerApp
 
 
 def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
@@ -81,40 +73,18 @@ def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
     return config, args.show_thinking
 
 
-async def _run(config: SessionConfig, show_thinking: bool) -> int:
-    """Async main: set up TUI, run orchestrator, return exit code."""
+def _run(config: SessionConfig, show_thinking: bool) -> int:
+    """Set up TUI, run Textual app with orchestrator, return exit code."""
     tui = TUI(show_thinking=show_thinking)
-    console = Console()
-
-    # Register signal handler for graceful subprocess cleanup
-    loop = asyncio.get_event_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, cleanup_subprocess)
-
-    with Live(console=console, refresh_per_second=4, screen=True) as live:
-        async def _refresh_loop() -> None:
-            """Periodically push fresh renderable to Live."""
-            while True:
-                live.update(tui.get_renderable())
-                await asyncio.sleep(0.25)
-
-        refresh_task = asyncio.create_task(_refresh_loop())
-        try:
-            story_count = await run_stories(config, tui)
-        finally:
-            refresh_task.cancel()
-            try:
-                await refresh_task
-            except asyncio.CancelledError:
-                pass
-
-    return 0 if story_count > 0 else 1
+    app = StoryRunnerApp(tui=tui, config=config)
+    app.run()
+    return getattr(app, '_exit_code', 1)
 
 
 def main(argv: list[str] | None = None) -> None:
     """Entry point."""
     config, show_thinking = parse_args(argv)
-    exit_code = asyncio.run(_run(config, show_thinking))
+    exit_code = _run(config, show_thinking)
     sys.exit(exit_code)
 
 

@@ -203,6 +203,43 @@ class TestScrollBehavior:
         text = render_to_text(log.render(height=5))
         assert "line-099" not in text
 
+    def test_new_lines_counter_increments(self):
+        log = ActivityLog()
+        for i in range(50):
+            log.add_event(TextEvent(text=f"line {i}", is_thinking=False))
+        log.scroll_up()
+        for i in range(5):
+            log.add_event(TextEvent(text=f"new {i}", is_thinking=False))
+        assert log._new_lines_since_pause == 5
+
+    def test_new_lines_counter_resets_on_resume(self):
+        log = ActivityLog()
+        for i in range(50):
+            log.add_event(TextEvent(text=f"line {i}", is_thinking=False))
+        log.scroll_up(lines=5)
+        for i in range(3):
+            log.add_event(TextEvent(text=f"new {i}", is_thinking=False))
+        assert log._new_lines_since_pause == 3
+        log.scroll_down(lines=5)
+        assert log._new_lines_since_pause == 0
+
+    def test_scroll_indicator_in_render(self):
+        log = ActivityLog()
+        for i in range(50):
+            log.add_event(TextEvent(text=f"line {i}", is_thinking=False))
+        log.scroll_up()
+        for i in range(3):
+            log.add_event(TextEvent(text=f"new {i}", is_thinking=False))
+        text = render_to_text(log.render(height=10))
+        assert "new lines" in text
+
+    def test_scroll_indicator_absent_when_at_bottom(self):
+        log = ActivityLog()
+        for i in range(50):
+            log.add_event(TextEvent(text=f"line {i}", is_thinking=False))
+        text = render_to_text(log.render(height=10))
+        assert "new lines" not in text
+
 
 # --- Dashboard tests ---
 
@@ -297,9 +334,7 @@ class TestTUI:
         tui.handle_event(RateLimitEvent(status="allowed", resets_at=None, rate_limit_type="token"))
         assert tui.dashboard.rate_limit_active is False
 
-    def test_get_renderable(self):
+    def test_handle_event_dispatches_to_activity_log(self):
         tui = TUI()
-        renderable = tui.get_renderable()
-        text = render_to_text(renderable)
-        assert "Activity Log" in text
-        assert "Dashboard" in text
+        tui.handle_event(TextEvent(text="hello", is_thinking=False))
+        assert len(tui.activity_log._lines) == 1

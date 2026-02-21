@@ -1,15 +1,17 @@
-"""Two-pane TUI using rich: activity log (top 70%) + orchestration dashboard (bottom 30%)."""
+"""Two-pane TUI using Textual: activity log (top 70%) + orchestration dashboard (bottom 30%)."""
 
 from __future__ import annotations
 
-import shutil
+import asyncio
 import time
 from datetime import datetime, timezone
 
 from rich.console import Group, RenderableType
-from rich.layout import Layout
-from rich.panel import Panel
 from rich.text import Text
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.events import MouseScrollDown, MouseScrollUp
+from textual.widgets import Static
 
 from .models import (
     InitEvent,
@@ -69,6 +71,7 @@ class ActivityLog:
         self._max_lines = max_lines
         self.auto_scroll = True
         self.scroll_offset = 0  # lines from bottom
+        self._new_lines_since_pause: int = 0
 
     def add_event(self, event: StreamEvent, show_thinking: bool = False) -> None:
         line = self._render_event(event, show_thinking)
@@ -78,6 +81,8 @@ class ActivityLog:
                 self._lines = self._lines[-self._max_lines:]
             if self.auto_scroll:
                 self.scroll_offset = 0
+            else:
+                self._new_lines_since_pause += 1
 
     def _render_event(self, event: StreamEvent, show_thinking: bool) -> Text | None:
         _kw = {"no_wrap": True, "overflow": "ellipsis"}
@@ -125,10 +130,17 @@ class ActivityLog:
         if not self._lines:
             return Text("Waiting for events...", style="dim italic")
 
+        show_indicator = not self.auto_scroll and self._new_lines_since_pause > 0
+        content_height = height - 1 if show_indicator else height
+
         end = len(self._lines) - self.scroll_offset
-        start = max(0, end - height)
+        start = max(0, end - content_height)
         end = max(start, end)
-        visible = self._lines[start:end]
+        visible = list(self._lines[start:end])
+
+        if show_indicator:
+            visible.append(Text(f"▼ {self._new_lines_since_pause} new lines", style="bold yellow"))
+
         return Group(*visible)
 
     def scroll_up(self, lines: int = 3) -> None:
@@ -140,6 +152,7 @@ class ActivityLog:
         self.scroll_offset = max(0, self.scroll_offset - lines)
         if self.scroll_offset == 0:
             self.auto_scroll = True
+            self._new_lines_since_pause = 0
 
 
 class Dashboard:
@@ -254,17 +267,12 @@ class Dashboard:
 
 
 class TUI:
-    """Top-level TUI manager composing activity log and dashboard."""
+    """Top-level TUI data coordinator — dispatches events to ActivityLog and Dashboard."""
 
     def __init__(self, show_thinking: bool = False) -> None:
         self.activity_log = ActivityLog()
         self.dashboard = Dashboard()
         self.show_thinking = show_thinking
-        self._layout = Layout()
-        self._layout.split_column(
-            Layout(name="activity", ratio=7),
-            Layout(name="dashboard", ratio=3),
-        )
 
     def handle_event(self, event: StreamEvent) -> None:
         self.activity_log.add_event(event, self.show_thinking)
@@ -280,24 +288,100 @@ class TUI:
                     resets_at=resets_at,
                 )
 
-    def update_timers(
-        self,
-        step_elapsed: float,
-        story_elapsed: float,
-        total_elapsed: float,
-    ) -> None:
-        if self.dashboard.story_state is not None:
-            self.dashboard.step_elapsed = step_elapsed
-            self.dashboard.story_elapsed = story_elapsed
-        self.dashboard.total_elapsed = total_elapsed
 
-    def get_renderable(self) -> RenderableType:
-        term_h = shutil.get_terminal_size().lines
-        activity_h = max(5, int(term_h * 7 / 10) - 2)
-        self._layout["activity"].update(
-            Panel(self.activity_log.render(height=activity_h), title="Activity Log", border_style="blue")
-        )
-        self._layout["dashboard"].update(
-            Panel(self.dashboard.render(), title="Dashboard", border_style="green")
-        )
-        return self._layout
+# --- Textual widgets and App ---
+
+
+class ActivityLogWidget(Static):
+    """Textual widget wrapping ActivityLog for display with mouse scroll support."""
+
+    DEFAULT_CSS = "ActivityLogWidget { height: 7fr; border: solid blue; border-title-align: center; }"
+    BORDER_TITLE = "Activity Log"
+
+    def __init__(self, activity_log: ActivityLog) -> None:
+        super().__init__()
+        self._log = activity_log
+
+    def render(self) -> RenderableType:
+        return self._log.render(height=max(1, self.size.height - 2))
+
+    def on_mouse_scroll_up(self, event: MouseScrollUp) -> None:
+        self._log.scroll_up(lines=3)
+        self.refresh()
+
+    def on_mouse_scroll_down(self, event: MouseScrollDown) -> None:
+        self._log.scroll_down(lines=3)
+        self.refresh()
+
+
+class DashboardWidget(Static):
+    """Textual widget wrapping Dashboard for display."""
+
+    DEFAULT_CSS = "DashboardWidget { height: 3fr; border: solid green; border-title-align: center; }"
+    BORDER_TITLE = "Dashboard"
+
+    def __init__(self, dashboard: Dashboard) -> None:
+        super().__init__()
+        self._dash = dashboard
+
+    def render(self) -> RenderableType:
+        return self._dash.render()
+
+
+class StoryRunnerApp(App):
+    """Top-level Textual app composing ActivityLogWidget and DashboardWidget."""
+
+    CSS = "Screen { layout: vertical; }"
+
+    BINDINGS = [
+        Binding("pageup", "scroll_activity(-20)", "Page Up", show=False),
+        Binding("pagedown", "scroll_activity(20)", "Page Down", show=False),
+        Binding("up", "scroll_activity(-1)", "Up", show=False),
+        Binding("down", "scroll_activity(1)", "Down", show=False),
+        Binding("q", "quit", "Quit", show=False),
+    ]
+
+    def __init__(self, tui: TUI, config: "SessionConfig") -> None:
+        super().__init__()
+        self._tui = tui
+        self._config = config
+        self._exit_code = 1
+
+    def compose(self) -> ComposeResult:
+        yield ActivityLogWidget(self._tui.activity_log)
+        yield DashboardWidget(self._tui.dashboard)
+
+    def on_mount(self) -> None:
+        self.set_interval(0.25, self._refresh_widgets)
+        self.run_worker(self._run_orchestrator, thread=False)
+
+    def _refresh_widgets(self) -> None:
+        activity_widget = self.query_one(ActivityLogWidget)
+        activity_widget.refresh()
+        self.query_one(DashboardWidget).refresh()
+        # Update scroll indicator in border subtitle
+        log = activity_widget._log
+        if not log.auto_scroll and log._new_lines_since_pause > 0:
+            activity_widget.border_subtitle = f"▼ {log._new_lines_since_pause} new lines"
+        else:
+            activity_widget.border_subtitle = ""
+
+    async def _run_orchestrator(self) -> None:
+        from .orchestrator import run_stories as _run_stories
+
+        story_count = await _run_stories(self._config, self._tui)
+        self._exit_code = 0 if story_count > 0 else 1
+        await asyncio.sleep(2)
+        self.exit()
+
+    def action_scroll_activity(self, delta: int) -> None:
+        if delta < 0:
+            self._tui.activity_log.scroll_up(lines=abs(delta))
+        elif delta > 0:
+            self._tui.activity_log.scroll_down(lines=delta)
+        self.query_one(ActivityLogWidget).refresh()
+
+    def on_unmount(self) -> None:
+        from .claude_session import cleanup_subprocess
+
+        cleanup_subprocess()
