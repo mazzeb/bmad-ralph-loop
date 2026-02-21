@@ -138,6 +138,7 @@ ${extra_prompt}"
   local cmd=(
     claude
     -p "$prompt_content"
+    --verbose
     --max-turns "$max_turns"
     --output-format stream-json
     --dangerously-skip-permissions
