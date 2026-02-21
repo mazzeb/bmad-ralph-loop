@@ -22,7 +22,7 @@ from run_stories.models import (
     ToolUseEvent,
     UnknownEvent,
 )
-from run_stories.tui import ActivityLog, Dashboard, TUI, _format_duration, _format_elapsed
+from run_stories.tui import ActivityLog, Dashboard, StoryRunnerApp, TUI, _format_duration, _format_elapsed
 
 
 # --- Helper ---
@@ -338,3 +338,47 @@ class TestTUI:
         tui = TUI()
         tui.handle_event(TextEvent(text="hello", is_thinking=False))
         assert len(tui.activity_log._lines) == 1
+
+
+# --- StoryRunnerApp finished behavior ---
+
+
+class TestStoryRunnerAppFinished:
+    def _make_app(self):
+        from pathlib import Path
+        from run_stories.models import SessionConfig
+
+        config = SessionConfig(project_dir=Path("/tmp"))
+        tui = TUI()
+        app = StoryRunnerApp(tui=tui, config=config)
+        return app
+
+    def test_initial_finished_is_false(self):
+        app = self._make_app()
+        assert app._finished is False
+
+    def test_close_if_finished_does_nothing_when_not_finished(self):
+        app = self._make_app()
+        # Should not raise or call exit
+        app.action_close_if_finished()
+        # App should still exist (no exit called)
+        assert app._finished is False
+
+    def test_close_if_finished_exits_when_finished(self):
+        app = self._make_app()
+        app._finished = True
+        exited = False
+        original_exit = app.exit
+
+        def mock_exit(*args, **kwargs):
+            nonlocal exited
+            exited = True
+
+        app.exit = mock_exit
+        app.action_close_if_finished()
+        assert exited is True
+
+    def test_enter_binding_exists(self):
+        app = self._make_app()
+        actions = [b.action for b in app.BINDINGS]
+        assert "close_if_finished" in actions

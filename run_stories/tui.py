@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import time
 from datetime import datetime, timezone
 
@@ -339,6 +338,7 @@ class StoryRunnerApp(App):
         Binding("up", "scroll_activity(-1)", "Up", show=False),
         Binding("down", "scroll_activity(1)", "Down", show=False),
         Binding("q", "quit", "Quit", show=False),
+        Binding("enter", "close_if_finished", "Close", show=False),
     ]
 
     def __init__(self, tui: TUI, config: "SessionConfig") -> None:
@@ -346,6 +346,7 @@ class StoryRunnerApp(App):
         self._tui = tui
         self._config = config
         self._exit_code = 1
+        self._finished = False
 
     def compose(self) -> ComposeResult:
         yield ActivityLogWidget(self._tui.activity_log)
@@ -369,10 +370,22 @@ class StoryRunnerApp(App):
     async def _run_orchestrator(self) -> None:
         from .orchestrator import run_stories as _run_stories
 
-        story_count = await _run_stories(self._config, self._tui)
-        self._exit_code = 0 if story_count > 0 else 1
-        await asyncio.sleep(2)
-        self.exit()
+        try:
+            story_count = await _run_stories(self._config, self._tui)
+            self._exit_code = 0 if story_count > 0 else 1
+        except Exception as exc:
+            self._tui.handle_event(TextEvent(
+                text=f"FATAL: Orchestrator crashed: {exc}",
+                is_thinking=False,
+            ))
+            self._exit_code = 1
+        finally:
+            self._finished = True
+            self._tui.dashboard.countdown_message = "Finished -- press Enter to close"
+
+    def action_close_if_finished(self) -> None:
+        if self._finished:
+            self.exit()
 
     def action_scroll_activity(self, delta: int) -> None:
         if delta < 0:
