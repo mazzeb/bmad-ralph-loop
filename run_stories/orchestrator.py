@@ -52,10 +52,15 @@ async def _check_git_dirty(project_dir: Path, tui: TUI) -> bool:
 
 
 async def _check_story_committed(project_dir: Path, story_key: str) -> bool:
-    """Return True if a commit referencing story_key exists in git log."""
+    """Return True if a commit referencing this story exists in git log.
+
+    Searches for the story-ID pattern (e.g. 'story-1.2') used in commit
+    subjects, since the full story_key may not appear in the message.
+    """
+    search_term = f"story-{story_id_from_key(story_key)}"
     try:
         proc = await asyncio.create_subprocess_exec(
-            "git", "log", "--oneline", f"--grep={story_key}",
+            "git", "log", "--all", "--oneline", f"--grep={search_term}",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=project_dir,
