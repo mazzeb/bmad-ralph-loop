@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+command -v uv >/dev/null 2>&1 || { echo "Error: 'uv' is required but not found. See https://docs.astral.sh/uv/" >&2; exit 1; }
+exec uv run run-stories "$@"

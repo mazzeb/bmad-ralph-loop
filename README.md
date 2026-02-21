@@ -6,7 +6,9 @@ Runs the full BMAD story implementation cycle unattended using Claude Code CLI s
 
 | File | Purpose |
 |---|---|
-| `run-stories.sh` | Orchestration script — loops through backlog stories |
+| `run-stories` | Wrapper script — delegates to the Python package via `uv` |
+| `run_stories/` | Python TUI Story Runner package |
+| `pyproject.toml` | Python project config (dependencies, entry point, build system) |
 | `PROMPT-create-story.md` | Prompt for the Create Story (CS) step |
 | `PROMPT-dev-story.md` | Prompt for the Dev Story (DS) step |
 | `PROMPT-code-review.md` | Prompt for the Code Review (CR) step |
@@ -14,8 +16,9 @@ Runs the full BMAD story implementation cycle unattended using Claude Code CLI s
 ## Prerequisites
 
 1. **Claude Code CLI** installed and on your PATH (`claude` command available)
-2. **BMAD framework** installed in your project (`_bmad/` directory with the `bmm` module)
-3. **BMAD planning phases completed** (see below)
+2. **[uv](https://docs.astral.sh/uv/) >= 0.5** installed (`uv` command available)
+3. **BMAD framework** installed in your project (`_bmad/` directory with the `bmm` module)
+4. **BMAD planning phases completed** (see below)
 
 ## Required BMAD Steps Before Running
 
@@ -37,27 +40,38 @@ After Sprint Planning, you should have:
 
 ## Setup
 
-Copy all 4 files to your project root:
+Clone or copy this repository into your project. The `pyproject.toml` defines the runner's dependencies and entry point — if your project already has its own `pyproject.toml`, copy the files into a subdirectory instead and run from there.
 
 ```bash
-cp run-stories.sh PROMPT-create-story.md PROMPT-dev-story.md PROMPT-code-review.md /path/to/your-project/
-chmod +x /path/to/your-project/run-stories.sh
+# Option A: clone into project
+git clone <this-repo> /path/to/your-project/bmad-ralph-loop
+cd /path/to/your-project/bmad-ralph-loop
+
+# Option B: copy files alongside your project
+cp run-stories PROMPT-create-story.md PROMPT-dev-story.md PROMPT-code-review.md /path/to/your-project/
+cp -r run_stories/ pyproject.toml /path/to/your-project/
+chmod +x /path/to/your-project/run-stories
 ```
+
+> **Migrating from `run-stories.sh`?** The old bash script has been replaced by a Python package. Use `uv run run-stories` (or `./run-stories`) instead of `./run-stories.sh`. All CLI flags are the same.
 
 ## Usage
 
 ```bash
 # Run all remaining backlog stories
-./run-stories.sh
+uv run run-stories
 
 # Run just the next story
-./run-stories.sh --max-stories 1
+uv run run-stories --max-stories 1
 
 # Use different models for dev vs review
-./run-stories.sh --dev-model opus --review-model sonnet
+uv run run-stories --dev-model opus --review-model sonnet
 
 # Preview what would run without executing
-./run-stories.sh --dry-run
+uv run run-stories --dry-run
+
+# Or use the wrapper script (runs uv run run-stories under the hood)
+./run-stories --max-stories 1
 ```
 
 ### Options
