@@ -39,3 +39,30 @@ def story_id_from_key(key: str) -> str:
     if len(parts) >= 2:
         return f"{parts[0]}.{parts[1]}"
     return key
+
+
+def count_epics(data: dict) -> tuple[int, int]:
+    """Return (total_epics, done_epics) from sprint status data."""
+    dev_status = data.get("development_status", {})
+    total = 0
+    done = 0
+    for key, status in dev_status.items():
+        # $ anchor excludes "epic-1-retrospective" keys
+        if re.match(r"epic-\d+$", str(key)):
+            total += 1
+            if str(status) == "done":
+                done += 1
+    return total, done
+
+
+def count_stories(data: dict) -> tuple[int, int]:
+    """Return (total_stories, done_stories) from sprint status data."""
+    dev_status = data.get("development_status", {})
+    total = 0
+    done = 0
+    for key, status in dev_status.items():
+        if re.match(r"\d+-\d+-.+", str(key)):
+            total += 1
+            if str(status) == "done":
+                done += 1
+    return total, done

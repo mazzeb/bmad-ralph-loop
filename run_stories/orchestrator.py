@@ -21,6 +21,8 @@ from .models import (
     TextEvent,
 )
 from .sprint_status import (
+    count_epics,
+    count_stories,
     get_story_status,
     load_status,
     next_backlog_story,
@@ -56,6 +58,9 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
 
     story_count = 0
     total_start = time.monotonic()
+
+    # Initial sprint stats
+    _refresh_sprint_stats(sprint_status_path, tui)
 
     for i in range(1, config.max_stories + 1):
         # --- Find next story ---
@@ -140,6 +145,7 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                 is_thinking=False,
             ))
             break
+        _refresh_sprint_stats(sprint_status_path, tui)
 
         # ---- STEP 2-3: DEV STORY + CODE REVIEW LOOP ----
         story_done = False
@@ -260,6 +266,7 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
             )
             story_state.step_results.append(commit_result)
             story_count += 1
+            _refresh_sprint_stats(sprint_status_path, tui)
         else:
             status_data = load_status(sprint_status_path)
             status = get_story_status(status_data, story_key)
@@ -283,3 +290,14 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
     ))
 
     return story_count
+
+
+def _refresh_sprint_stats(sprint_status_path: Path, tui: TUI) -> None:
+    """Load sprint status and update dashboard counters. Failures are non-fatal."""
+    try:
+        data = load_status(sprint_status_path)
+        total_epics, done_epics = count_epics(data)
+        total_stories, done_stories = count_stories(data)
+        tui.dashboard.update_sprint_stats(total_epics, done_epics, total_stories, done_stories)
+    except Exception:
+        pass  # Sprint stats are cosmetic; don't crash the orchestrator

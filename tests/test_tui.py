@@ -312,6 +312,32 @@ class TestDashboard:
         text = render_to_text(dash.render())
         assert "Next story in 3s..." in text
 
+    def test_sprint_stats_displayed(self):
+        dash = Dashboard()
+        dash.update_sprint_stats(total_epics=5, done_epics=2, total_stories=30, done_stories=8)
+        text = render_to_text(dash.render())
+        assert "2/5 epics" in text
+        assert "8/30 stories done" in text
+
+    def test_sprint_stats_hidden_when_no_stories(self):
+        dash = Dashboard()
+        text = render_to_text(dash.render())
+        assert "Sprint:" not in text
+
+    def test_sprint_stats_zero_done(self):
+        dash = Dashboard()
+        dash.update_sprint_stats(total_epics=3, done_epics=0, total_stories=15, done_stories=0)
+        text = render_to_text(dash.render())
+        assert "0/3 epics" in text
+        assert "0/15 stories done" in text
+
+    def test_sprint_stats_epics_only_no_stories(self):
+        dash = Dashboard()
+        dash.update_sprint_stats(total_epics=2, done_epics=0, total_stories=0, done_stories=0)
+        text = render_to_text(dash.render())
+        assert "Sprint:" in text
+        assert "0/2 epics" in text
+
 
 # --- TUI integration ---
 

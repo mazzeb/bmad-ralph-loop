@@ -172,6 +172,11 @@ class Dashboard:
         self._step_start: float = 0
         self._story_start: float = 0
         self._total_start: float = 0
+        # Sprint overview stats
+        self.total_epics: int = 0
+        self.done_epics: int = 0
+        self.total_stories: int = 0
+        self.done_stories: int = 0
 
     def update_state(
         self,
@@ -194,6 +199,19 @@ class Dashboard:
         self._step_start = step_start
         self._story_start = story_start
         self._total_start = total_start
+
+    def update_sprint_stats(
+        self,
+        total_epics: int,
+        done_epics: int,
+        total_stories: int,
+        done_stories: int,
+    ) -> None:
+        """Update sprint overview counters."""
+        self.total_epics = total_epics
+        self.done_epics = done_epics
+        self.total_stories = total_stories
+        self.done_stories = done_stories
 
     def update_rate_limit(self, active: bool, resets_at: datetime | None = None) -> None:
         self.rate_limit_active = active
@@ -241,6 +259,11 @@ class Dashboard:
                     lines.append(Text(f"  ○ {label}", style="dim"))
 
             lines.append(Text(""))
+
+        # Sprint overview
+        if self.total_epics > 0 or self.total_stories > 0:
+            sprint = f"Sprint: {self.done_epics}/{self.total_epics} epics | {self.done_stories}/{self.total_stories} stories done"
+            lines.append(Text(sprint, style="cyan"))
 
         # Timers
         timers = f"Step: {_format_elapsed(self.step_elapsed)}  |  Story: {_format_elapsed(self.story_elapsed)}  |  Total: {_format_elapsed(self.total_elapsed)}"
