@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import time
 from datetime import datetime, timezone
 
@@ -79,30 +80,30 @@ class ActivityLog:
                 self.scroll_offset = 0
 
     def _render_event(self, event: StreamEvent, show_thinking: bool) -> Text | None:
+        _kw = {"no_wrap": True, "overflow": "ellipsis"}
         match event:
             case ToolUseEvent(tool_name=name, input_summary=summary):
-                return Text(f"● {name} {summary}", style="dim")
+                return Text(f"● {name} {summary}", style="dim", **_kw)
             case ToolResultEvent():
                 return None  # skip, too noisy
             case TextEvent(text=text, is_thinking=True):
                 if not show_thinking:
                     return None
-                truncated = text[:80] + "..." if len(text) > 80 else text
-                return Text(f"💭 {truncated}", style="dim italic")
+                return Text(f"💭 {text}", style="dim italic", **_kw)
             case TextEvent(text=text, is_thinking=False):
-                truncated = text[:120] + "..." if len(text) > 120 else text
-                return Text(f"◆ {truncated}", style="white")
+                return Text(f"◆ {text}", style="white", **_kw)
             case MarkerEvent(marker_type=mt, payload=payload):
                 style = "bold red" if mt == MarkerType.HALT else "bold green"
-                return Text(f"▶ {mt.value}: {payload}", style=style)
+                return Text(f"▶ {mt.value}: {payload}", style=style, **_kw)
             case InitEvent(model=model, tools=tools, permission_mode=pm):
-                return Text(f"Started: {model}, {len(tools)} tools, {pm}", style="cyan")
+                return Text(f"Started: {model}, {len(tools)} tools, {pm}", style="cyan", **_kw)
             case ResultEvent(num_turns=turns, duration_ms=dur, cost_usd=cost, is_error=err):
                 if err:
-                    return Text(f"✗ Error: {turns} turns, {_format_duration(dur)}", style="bold red")
+                    return Text(f"✗ Error: {turns} turns, {_format_duration(dur)}", style="bold red", **_kw)
                 return Text(
                     f"✓ Done: {turns} turns, {_format_duration(dur)}, {_format_cost(cost)}",
                     style="bold green",
+                    **_kw,
                 )
             case RateLimitEvent(status=status, resets_at=resets_at):
                 if status == "allowed":
@@ -110,11 +111,11 @@ class ActivityLog:
                 if resets_at:
                     delta = (resets_at - datetime.now(timezone.utc)).total_seconds()
                     countdown = _format_elapsed(max(0, delta))
-                    return Text(f"⚠ Rate limited — resets in {countdown}", style="bold yellow")
-                return Text("⚠ Rate limited", style="bold yellow")
+                    return Text(f"⚠ Rate limited — resets in {countdown}", style="bold yellow", **_kw)
+                return Text("⚠ Rate limited", style="bold yellow", **_kw)
             case SystemEvent(subtype=st):
                 if st == "task_started":
-                    return Text(f"⚙ {st}", style="dim")
+                    return Text(f"⚙ {st}", style="dim", **_kw)
                 return None  # skip hooks
             case UnknownEvent():
                 return None
@@ -291,8 +292,10 @@ class TUI:
         self.dashboard.total_elapsed = total_elapsed
 
     def get_renderable(self) -> RenderableType:
+        term_h = shutil.get_terminal_size().lines
+        activity_h = max(5, int(term_h * 7 / 10) - 2)
         self._layout["activity"].update(
-            Panel(self.activity_log.render(), title="Activity Log", border_style="blue")
+            Panel(self.activity_log.render(height=activity_h), title="Activity Log", border_style="blue")
         )
         self._layout["dashboard"].update(
             Panel(self.dashboard.render(), title="Dashboard", border_style="green")

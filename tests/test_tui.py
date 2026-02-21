@@ -149,11 +149,15 @@ class TestActivityLog:
         assert len(log._lines) == 0
 
     def test_text_truncation(self):
+        """Long text is truncated by Rich's overflow='ellipsis', not manual slicing."""
         log = ActivityLog()
         long_text = "x" * 200
         log.add_event(TextEvent(text=long_text, is_thinking=False))
         text = render_to_text(log.render())
-        assert "..." in text
+        # Rich adds an ellipsis character when overflow="ellipsis" truncates
+        assert "…" in text
+        # Output should be bounded by the console width (120), not contain full 200 chars
+        assert long_text not in text
 
     def test_rate_limit_hidden_when_allowed(self):
         log = ActivityLog()

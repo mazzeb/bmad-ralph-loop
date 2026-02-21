@@ -159,10 +159,9 @@ def summarize_tool_input(tool_name: str, input_data: dict) -> str:
     """Extract a short summary from tool input data."""
     key = _TOOL_INPUT_KEYS.get(tool_name)
     if key and key in input_data:
-        val = str(input_data[key])
-        return val[:60] if len(val) > 60 else val
+        return str(input_data[key])
     # Fallback: first string value
     for v in input_data.values():
         if isinstance(v, str):
-            return v[:60] if len(v) > 60 else v
+            return v
     return ""
