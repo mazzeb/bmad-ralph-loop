@@ -6,6 +6,7 @@ Runs the full BMAD story implementation cycle unattended using Claude Code CLI s
 
 | File | Purpose |
 |---|---|
+| `install.sh` | Installs prompt files and wrapper into a parent project |
 | `run-stories` | Wrapper script — delegates to the Python package via `uv` |
 | `run_stories/` | Python TUI Story Runner package |
 | `pyproject.toml` | Python project config (dependencies, entry point, build system) |
@@ -40,38 +41,47 @@ After Sprint Planning, you should have:
 
 ## Setup
 
-Clone or copy this repository into your project. The `pyproject.toml` defines the runner's dependencies and entry point — if your project already has its own `pyproject.toml`, copy the files into a subdirectory instead and run from there.
+### Option A: Subdirectory install (recommended)
+
+Clone this repo into a subdirectory of your project and run the install script. This keeps the runner isolated from your project's own `pyproject.toml`.
 
 ```bash
-# Option A: clone into project
-git clone <this-repo> /path/to/your-project/bmad-ralph-loop
-cd /path/to/your-project/bmad-ralph-loop
-
-# Option B: copy files alongside your project
-cp run-stories PROMPT-create-story.md PROMPT-dev-story.md PROMPT-code-review.md /path/to/your-project/
-cp -r run_stories/ pyproject.toml /path/to/your-project/
-chmod +x /path/to/your-project/run-stories
+cd /path/to/your-project
+git clone <this-repo> bmad-ralph-loop
+./bmad-ralph-loop/install.sh          # target defaults to parent dir (your project root)
 ```
 
-> **Migrating from `run-stories.sh`?** The old bash script has been replaced by a Python package. Use `uv run run-stories` (or `./run-stories`) instead of `./run-stories.sh`. All CLI flags are the same.
+The install script:
+- Copies the `PROMPT-*.md` files to your project root
+- Creates a `run-stories` wrapper that invokes the package via `uv run --project`
+
+### Option B: Standalone
+
+Use the repo directly — run everything from within the cloned directory. Paths for prompts, sprint-status, and output resolve from your current working directory.
+
+```bash
+cd /path/to/bmad-ralph-loop
+./run-stories --help
+```
+
+> **Migrating from `run-stories.sh`?** The old bash script has been replaced by a Python package. Use `./run-stories` instead of `./run-stories.sh`. All CLI flags are the same.
 
 ## Usage
 
+Run from your project root (where `sprint-status.yaml` and `_bmad-output/` live):
+
 ```bash
 # Run all remaining backlog stories
-uv run run-stories
+./run-stories
 
 # Run just the next story
-uv run run-stories --max-stories 1
+./run-stories --max-stories 1
 
 # Use different models for dev vs review
-uv run run-stories --dev-model opus --review-model sonnet
+./run-stories --dev-model opus --review-model sonnet
 
 # Preview what would run without executing
-uv run run-stories --dry-run
-
-# Or use the wrapper script (runs uv run run-stories under the hood)
-./run-stories --max-stories 1
+./run-stories --dry-run
 ```
 
 ### Options
