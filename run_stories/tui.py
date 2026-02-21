@@ -395,7 +395,8 @@ class StoryRunnerApp(App):
     def _refresh_widgets(self) -> None:
         activity_widget = self.query_one(ActivityLogWidget)
         activity_widget.refresh()
-        self.query_one(DashboardWidget).refresh()
+        # layout=True: height:auto needs a layout pass to resize when content changes
+        self.query_one(DashboardWidget).refresh(layout=True)
         # Update scroll indicator in border subtitle
         log = activity_widget._log
         if not log.auto_scroll and log._new_lines_since_pause > 0:
