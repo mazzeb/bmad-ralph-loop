@@ -311,19 +311,38 @@ for i in $(seq 1 "$MAX_STORIES"); do
 
     cd "$PROJECT_DIR"
     git add -A
-    git commit -m "$(cat <<EOF
+
+    # Generate a meaningful commit message from the actual changes
+    COMMIT_MSG=$(claude -p "$(cat <<PROMPT
+Generate a git commit message for this story implementation.
+
+Story ID: ${STORY_ID}
+Story key: ${STORY_KEY}
+Story file: ${STORY_FILE}
+
+Rules:
+- First line: feat(story-${STORY_ID}): <concise description of what was built>
+- Empty line, then 3-6 bullet points summarizing the key changes
+- End with: Co-Authored-By: Claude <noreply@anthropic.com>
+- Keep it factual — describe what was implemented, not the process
+- Max 20 words for the first line
+
+Read the story file at ${STORY_FILE} and run 'git diff --cached --stat' to understand what changed.
+Output ONLY the commit message, nothing else.
+PROMPT
+    )" --max-turns 5 --dangerously-skip-permissions 2>/dev/null)
+
+    # Fallback to generic message if generation fails
+    if [[ -z "$COMMIT_MSG" || $? -ne 0 ]]; then
+      COMMIT_MSG="$(cat <<EOF
 feat(story-${STORY_ID}): implement ${STORY_KEY}
-
-BMAD story cycle complete:
-- Story created, implemented, and code-reviewed
-- All acceptance criteria verified
-- All tests passing
-
-Story: ${STORY_ID} (${STORY_KEY})
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
-    )"
+      )"
+    fi
+
+    git commit -m "$COMMIT_MSG"
 
     echo "Committed: story-${STORY_ID}"
     STORY_COUNT=$((STORY_COUNT + 1))
