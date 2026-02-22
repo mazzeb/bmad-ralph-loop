@@ -16,7 +16,7 @@ from run_stories.models import (
     StepKind,
     StepResult,
 )
-from run_stories.orchestrator import run_stories
+from run_stories.orchestrator import _load_status_safe, run_stories
 from run_stories.tui import TUI
 
 
@@ -588,3 +588,404 @@ class TestDryRunShowsResumeStep:
         messages = [call.args[0].text for call in mock_tui.handle_event.call_args_list
                     if hasattr(call.args[0], "text")]
         assert any("code-review" in msg for msg in messages)
+
+
+def _tui_messages(tui: TUI) -> list[str]:
+    """Extract text messages from TUI activity log lines."""
+    return [line.plain for line in tui.activity_log._lines]
+
+
+class TestCSSessionErrorButStatusAdvanced:
+    """CS session ends with is_error (e.g. max turns) but story was created → continue to DS."""
+
+    @pytest.mark.asyncio
+    async def test_continues_to_ds_on_session_error(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        steps_called = []
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            steps_called.append(step_kind)
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                # Session "failed" (e.g. max turns) but work was done
+                return StepResult(
+                    kind=StepKind.CS,
+                    story_key="1-2-next-story",
+                    duration_ms=10000,
+                    num_turns=100,
+                    cost_usd=1.0,
+                    markers_detected=[],
+                    success=False,
+                )
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        assert StepKind.CS in steps_called
+        assert StepKind.DS in steps_called
+        assert StepKind.CR in steps_called
+        # Finding 9: verify warning was emitted
+        messages = _tui_messages(tui)
+        assert any("WARNING: CS session ended with error" in m for m in messages)
+
+
+class TestDSSessionErrorButStatusAdvanced:
+    """DS session ends with is_error (e.g. max turns) but status moved to review → continue to CR."""
+
+    @pytest.mark.asyncio
+    async def test_continues_to_cr_on_session_error(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        steps_called = []
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            steps_called.append(step_kind)
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                # Session "failed" but work was done
+                return StepResult(
+                    kind=StepKind.DS,
+                    story_key="1-2-next-story",
+                    duration_ms=10000,
+                    num_turns=200,
+                    cost_usd=2.0,
+                    markers_detected=[],
+                    success=False,
+                )
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        assert StepKind.DS in steps_called
+        assert StepKind.CR in steps_called
+        # Finding 9: verify warning was emitted
+        messages = _tui_messages(tui)
+        assert any("WARNING: DS session ended with error" in m for m in messages)
+
+
+class TestCSGenuineFailure:
+    """CS session fails AND status doesn't advance → should still break."""
+
+    @pytest.mark.asyncio
+    async def test_breaks_on_genuine_failure(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                # Session failed and status didn't change
+                return StepResult(
+                    kind=StepKind.CS,
+                    story_key="1-2-next-story",
+                    duration_ms=5000,
+                    num_turns=10,
+                    cost_usd=0.5,
+                    markers_detected=[],
+                    success=False,
+                )
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 0
+
+
+class TestDSGenuineFailure:
+    """DS session fails AND status doesn't advance → should break."""
+
+    @pytest.mark.asyncio
+    async def test_breaks_on_genuine_failure(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        steps_called = []
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            steps_called.append(step_kind)
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                # Session failed and status stayed at ready-for-dev
+                return StepResult(
+                    kind=StepKind.DS,
+                    story_key="1-2-next-story",
+                    duration_ms=5000,
+                    num_turns=10,
+                    cost_usd=0.5,
+                    markers_detected=[],
+                    success=False,
+                )
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 0
+        assert StepKind.CR not in steps_called
+
+
+class TestHaltWithAdvancedStatus:
+    """HALT marker during DS takes precedence even when status advanced to review."""
+
+    @pytest.mark.asyncio
+    async def test_halt_wins_over_status(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                # Status advanced BUT halt was emitted
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return StepResult(
+                    kind=StepKind.DS,
+                    story_key="1-2-next-story",
+                    duration_ms=10000,
+                    num_turns=50,
+                    cost_usd=1.0,
+                    markers_detected=[MarkerEvent(marker_type=MarkerType.HALT, payload="Dependency missing")],
+                    success=True,
+                )
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        commit_called = False
+
+        async def mock_commit_session(**kwargs):
+            nonlocal commit_called
+            commit_called = True
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 0
+        assert commit_called is False
+        messages = _tui_messages(tui)
+        assert any("HALTed" in m for m in messages)
+
+
+class TestCRSessionErrorButStatusDone:
+    """CR session ends with error but status is 'done' → story still completes."""
+
+    @pytest.mark.asyncio
+    async def test_completes_on_session_error(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                # CR approved and updated status, then hit max turns
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return StepResult(
+                    kind=StepKind.CR,
+                    story_key="1-2-next-story",
+                    duration_ms=10000,
+                    num_turns=150,
+                    cost_usd=1.5,
+                    markers_detected=[],
+                    success=False,
+                )
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+
+
+class TestCRSessionErrorStatusNotDone:
+    """CR session errors and status didn't advance → warning emitted, loop retries."""
+
+    @pytest.mark.asyncio
+    async def test_warns_and_retries(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+        config.max_review_rounds = 2
+
+        cr_count = 0
+
+        async def mock_run_session(**kwargs):
+            nonlocal cr_count
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                content = sprint_status.read_text()
+                if "ready-for-dev" in content:
+                    _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                cr_count += 1
+                if cr_count == 1:
+                    # First CR: session errors, status stays at review
+                    return StepResult(
+                        kind=StepKind.CR,
+                        story_key="1-2-next-story",
+                        duration_ms=5000,
+                        num_turns=150,
+                        cost_usd=1.0,
+                        markers_detected=[],
+                        success=False,
+                    )
+                else:
+                    _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                    return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        messages = _tui_messages(tui)
+        assert any("WARNING: CR session ended with error" in m for m in messages)
+
+
+class TestDSUnexpectedStatusBreaks:
+    """DS succeeds but status is unexpected (not review/done) → should break."""
+
+    @pytest.mark.asyncio
+    async def test_breaks_on_unexpected_status(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                # DS "succeeds" but status stays at ready-for-dev (didn't advance)
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN:
+            count = await run_stories(config, tui)
+
+        assert count == 0
+        messages = _tui_messages(tui)
+        assert any("Unexpected status" in m for m in messages)
+
+
+class TestLoadStatusSafe:
+    """_load_status_safe retries on YAML parse failure."""
+
+    @pytest.mark.asyncio
+    async def test_retries_on_first_failure(self, tmp_path):
+        path = tmp_path / "status.yaml"
+        path.write_text("development_status:\n  1-1-foo: backlog\n")
+
+        call_count = 0
+        original_load = __import__("run_stories.sprint_status", fromlist=["load_status"]).load_status
+
+        def flaky_load(p):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("Corrupt YAML")
+            return original_load(p)
+
+        with patch("run_stories.orchestrator.load_status", side_effect=flaky_load), \
+             patch("run_stories.orchestrator._STATUS_RETRY_DELAY", 0):
+            result = await _load_status_safe(path)
+
+        assert call_count == 2
+        assert "1-1-foo" in result.get("development_status", {})
+
+    @pytest.mark.asyncio
+    async def test_succeeds_on_first_try(self, tmp_path):
+        path = tmp_path / "status.yaml"
+        path.write_text("development_status:\n  1-1-foo: done\n")
+
+        result = await _load_status_safe(path)
+        assert result["development_status"]["1-1-foo"] == "done"
+
+    @pytest.mark.asyncio
+    async def test_raises_if_both_attempts_fail(self, tmp_path):
+        path = tmp_path / "status.yaml"
+
+        def always_fail(p):
+            raise ValueError("Corrupt YAML")
+
+        with patch("run_stories.orchestrator.load_status", side_effect=always_fail), \
+             patch("run_stories.orchestrator._STATUS_RETRY_DELAY", 0):
+            with pytest.raises(ValueError, match="Corrupt YAML"):
+                await _load_status_safe(path)

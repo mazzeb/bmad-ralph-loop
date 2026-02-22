@@ -31,6 +31,21 @@ from .sprint_status import (
 )
 from .tui import TUI
 
+_STATUS_RETRY_DELAY = 0.5  # seconds
+
+
+async def _load_status_safe(path: Path) -> dict:
+    """Load sprint status YAML with one retry to guard against partial writes.
+
+    If the first read fails (e.g. corrupt YAML from a subprocess killed
+    mid-write), waits briefly and retries. The final attempt raises on failure.
+    """
+    try:
+        return load_status(path)
+    except Exception:
+        await asyncio.sleep(_STATUS_RETRY_DELAY)
+        return load_status(path)
+
 
 async def _check_git_dirty(project_dir: Path, tui: TUI) -> bool:
     """Return True if the working tree has uncommitted changes."""
@@ -217,22 +232,23 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
             )
             story_state.step_results.append(cs_result)
 
-            if not cs_result.success:
+            # Check sprint status (ground truth) before session success flag.
+            # The session may report is_error (e.g. max turns) even though
+            # the story was fully created.
+            status_data = await _load_status_safe(sprint_status_path)
+            status = get_story_status(status_data, story_key)
+            if status != "ready-for-dev":
                 tui.handle_event(TextEvent(
-                    text=f"ERROR: Create Story failed. Check log: {log_cs}",
+                    text=f"ERROR: Create Story failed (status: {status}). Check log: {log_cs}",
                     is_thinking=False,
                 ))
                 break
 
-            # Verify story was created
-            status_data = load_status(sprint_status_path)
-            status = get_story_status(status_data, story_key)
-            if status != "ready-for-dev":
+            if not cs_result.success:
                 tui.handle_event(TextEvent(
-                    text=f"ERROR: Expected status 'ready-for-dev' after create-story, got '{status}'",
+                    text=f"WARNING: CS session ended with error but story {story_key} was created. Continuing. Log: {log_cs}",
                     is_thinking=False,
                 ))
-                break
             _refresh_sprint_stats(sprint_status_path, tui)
 
         # ---- STEP 2-3: DEV STORY + CODE REVIEW LOOP ----
@@ -300,24 +316,37 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                 )
                 story_state.step_results.append(ds_result)
 
-                if not ds_result.success:
-                    tui.handle_event(TextEvent(text=f"ERROR: Dev Story failed. Check log: {log_ds}", is_thinking=False))
-                    break
-
-                # Check for HALT
+                # Check for HALT (always fatal, regardless of status)
                 if any(m.marker_type == MarkerType.HALT for m in ds_result.markers_detected):
                     tui.handle_event(TextEvent(text=f"Dev Story HALTed. Check log: {log_ds}", is_thinking=False))
                     story_done = False
                     break
 
-                # Verify status moved to review
-                status_data = load_status(sprint_status_path)
+                # Check sprint status (ground truth) before session success flag.
+                # The session may report is_error (e.g. max turns) even though
+                # dev-story work completed and status advanced.
+                status_data = await _load_status_safe(sprint_status_path)
                 status = get_story_status(status_data, story_key)
-                if status != "review":
+                if status == "review":
+                    if not ds_result.success:
+                        tui.handle_event(TextEvent(
+                            text=f"WARNING: DS session ended with error but story {story_key} progressed to review. Continuing. Log: {log_ds}",
+                            is_thinking=False,
+                        ))
+                elif status == "done":
                     tui.handle_event(TextEvent(
-                        text=f"WARNING: Expected status 'review' after dev-story, got '{status}'",
+                        text=f"WARNING: Story {story_key} jumped to 'done' after DS, skipping code review.",
                         is_thinking=False,
                     ))
+                elif not ds_result.success:
+                    tui.handle_event(TextEvent(text=f"ERROR: Dev Story failed (status: {status}). Check log: {log_ds}", is_thinking=False))
+                    break
+                else:
+                    tui.handle_event(TextEvent(
+                        text=f"ERROR: Unexpected status '{status}' after dev-story for {story_key}. Check log: {log_ds}",
+                        is_thinking=False,
+                    ))
+                    break
 
             # --- Code Review (CR) ---
             story_state.current_step = StepKind.CR
@@ -344,13 +373,19 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
             )
             story_state.step_results.append(cr_result)
 
-            # Check review outcome
-            status_data = load_status(sprint_status_path)
+            # Check review outcome — use sprint status as ground truth
+            status_data = await _load_status_safe(sprint_status_path)
             status = get_story_status(status_data, story_key)
 
             if status == "done":
                 story_done = True
                 break
+
+            if not cr_result.success:
+                tui.handle_event(TextEvent(
+                    text=f"WARNING: CR session ended with error for {story_key} (status: {status}). Check log: {log_cr}",
+                    is_thinking=False,
+                ))
 
             if round_num < config.max_review_rounds:
                 tui.handle_event(TextEvent(
