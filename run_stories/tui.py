@@ -70,6 +70,8 @@ class ActivityLog:
     ``show_thinking`` which filters at storage-time in ``_render_event``.
     """
 
+    _IDLE_THRESHOLD: float = 15.0  # seconds before showing idle indicator
+
     def __init__(self, max_lines: int = 2000, show_tools: bool = False) -> None:
         self._lines: list[tuple[Text, bool]] = []  # (rendered_text, is_tool_use)
         self._max_lines = max_lines
@@ -78,6 +80,8 @@ class ActivityLog:
         self._new_lines_since_pause: int = 0
         self._show_tools: bool = show_tools
         self._visible_cache: list[Text] | None = None
+        self._session_active: bool = False
+        self._last_event_at: float = 0  # monotonic timestamp
 
     @property
     def show_tools(self) -> bool:
@@ -93,11 +97,18 @@ class ActivityLog:
             self.auto_scroll = True
             self._new_lines_since_pause = 0
 
+    def set_session_active(self, active: bool) -> None:
+        """Signal whether a Claude subprocess is currently running."""
+        self._session_active = active
+        if active:
+            self._last_event_at = time.monotonic()
+
     def add_event(self, event: StreamEvent, show_thinking: bool = False) -> None:
         line = self._render_event(event, show_thinking)
         if line is not None:
             is_tool = isinstance(event, ToolUseEvent)
             self._lines.append((line, is_tool))
+            self._last_event_at = time.monotonic()
             self._visible_cache = None
             if len(self._lines) > self._max_lines:
                 self._lines = self._lines[-self._max_lines:]
@@ -171,7 +182,13 @@ class ActivityLog:
             return Text("Waiting for events...", style="dim italic")
 
         show_indicator = not self.auto_scroll and self._new_lines_since_pause > 0
-        content_height = height - 1 if show_indicator else height
+        show_idle = (
+            self._session_active
+            and self._last_event_at > 0
+            and (time.monotonic() - self._last_event_at) >= self._IDLE_THRESHOLD
+        )
+        reserved = (1 if show_indicator else 0) + (1 if show_idle else 0)
+        content_height = max(1, height - reserved)
 
         # Clamp scroll_offset so we never scroll past the first line
         max_offset = max(0, len(lines) - content_height)
@@ -184,6 +201,11 @@ class ActivityLog:
 
         if show_indicator:
             visible.append(Text(f"▼ {self._new_lines_since_pause} new lines", style="bold yellow"))
+
+        # Idle indicator: show when a session is running but no events arrived recently
+        if show_idle:
+            idle = time.monotonic() - self._last_event_at
+            visible.append(Text(f"⏳ Processing... ({_format_elapsed(idle)} since last output)", style="dim italic"))
 
         return Group(*visible)
 
@@ -295,27 +317,56 @@ class Dashboard:
             lines.append(Text(f"Story {self.story_number}: {ss.story_key} ({ss.story_id})", style="bold"))
             lines.append(Text(""))
 
-            # Mini-history: show the last result for each step kind
+            # Mini-history: show every result with per-round timing
             all_kinds = [StepKind.CS, StepKind.DS, StepKind.CR, StepKind.COMMIT]
-            # Use last result per kind to handle multi-round DS/CR
-            last_by_kind: dict[StepKind, StepResult] = {}
-            for r in ss.step_results:
-                last_by_kind[r.kind] = r
 
-            for kind in all_kinds:
-                label = _STEP_LABELS[kind]
-                if kind in last_by_kind:
-                    r = last_by_kind[kind]
-                    line = Text(f"  ✓ {label:6s}  {r.num_turns} turns  {_format_duration(r.duration_ms)}  {_format_cost(r.cost_usd)}", style="green")
-                    lines.append(line)
-                elif kind == ss.current_step:
-                    extra = ""
-                    if kind in (StepKind.DS, StepKind.CR) and ss.current_round > 0:
-                        extra = f"  [round {ss.current_round}]"
-                    line = Text(f"  ● {label:6s}  {_format_elapsed(self.step_elapsed)}{extra}", style="bold white")
-                    lines.append(line)
+            # Determine if the current step is still in-progress
+            active_in_progress = False
+            if ss.current_step is not None:
+                n_done = sum(1 for r in ss.step_results if r.kind == ss.current_step)
+                if ss.current_step in (StepKind.DS, StepKind.CR):
+                    active_in_progress = ss.current_round > n_done
                 else:
-                    lines.append(Text(f"  ○ {label}", style="dim"))
+                    active_in_progress = n_done == 0
+
+            # Count completed results per kind & decide which need round labels
+            kind_counts: dict[StepKind, int] = {}
+            for r in ss.step_results:
+                kind_counts[r.kind] = kind_counts.get(r.kind, 0) + 1
+            needs_round: set[StepKind] = {k for k, c in kind_counts.items() if c > 1}
+            if active_in_progress and ss.current_step in kind_counts:
+                needs_round.add(ss.current_step)
+
+            # 1) Completed results — one line per result, chronological
+            round_idx: dict[StepKind, int] = {}
+            for r in ss.step_results:
+                round_idx[r.kind] = round_idx.get(r.kind, 0) + 1
+                label = _STEP_LABELS[r.kind]
+                if r.kind in needs_round:
+                    label = f"{label} r{round_idx[r.kind]}"
+                marker = "✗" if not r.success else "✓"
+                style = "red" if not r.success else "green"
+                line = Text(
+                    f"  {marker} {label:8s}  {r.num_turns} turns  {_format_duration(r.duration_ms)}  {_format_cost(r.cost_usd)}",
+                    style=style,
+                )
+                lines.append(line)
+
+            # 2) Currently active step
+            if active_in_progress:
+                label = _STEP_LABELS[ss.current_step]
+                if ss.current_step in needs_round:
+                    label = f"{label} r{ss.current_round}"
+                line = Text(f"  ● {label:8s}  {_format_elapsed(self.step_elapsed)}", style="bold white")
+                lines.append(line)
+
+            # 3) Pending steps (kinds not yet seen and not active)
+            seen = set(kind_counts)
+            if ss.current_step is not None:
+                seen.add(ss.current_step)
+            for kind in all_kinds:
+                if kind not in seen:
+                    lines.append(Text(f"  ○ {_STEP_LABELS[kind]}", style="dim"))
 
             lines.append(Text(""))
 

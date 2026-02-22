@@ -70,6 +70,7 @@ async def run_claude_session(
         limit=10 * 1024 * 1024,  # 10 MB – stream-json lines can be very long
     )
     _active_process = proc
+    tui.activity_log.set_session_active(True)
 
     timed_out = False
     try:
@@ -111,6 +112,7 @@ async def run_claude_session(
             exit_code = -1
     finally:
         _active_process = None
+        tui.activity_log.set_session_active(False)
 
     if timed_out:
         return StepResult(
@@ -176,6 +178,7 @@ Output ONLY the commit message, nothing else."""
 
     # Generate commit message via Claude
     commit_msg = ""
+    tui.activity_log.set_session_active(True)
     try:
         gen_proc = await asyncio.create_subprocess_exec(
             "claude", "-p", prompt,
@@ -190,6 +193,8 @@ Output ONLY the commit message, nothing else."""
             commit_msg = stdout.decode("utf-8", errors="replace").strip()
     except (OSError, FileNotFoundError):
         pass
+    finally:
+        tui.activity_log.set_session_active(False)
 
     # Fallback
     if not commit_msg:

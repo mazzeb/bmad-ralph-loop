@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from datetime import datetime, timezone
 from io import StringIO
 
@@ -329,6 +330,73 @@ class TestScrollBehavior:
         assert "line-019" in text
 
 
+# --- Idle indicator tests ---
+
+
+class TestIdleIndicator:
+    def test_no_indicator_when_session_inactive(self):
+        log = ActivityLog()
+        log.add_event(TextEvent(text="hello", is_thinking=False))
+        text = render_to_text(log.render(height=10))
+        assert "Processing" not in text
+
+    def test_no_indicator_when_idle_below_threshold(self):
+        log = ActivityLog()
+        log.set_session_active(True)
+        log.add_event(TextEvent(text="hello", is_thinking=False))
+        # Immediately after event — well below 15s threshold
+        text = render_to_text(log.render(height=10))
+        assert "Processing" not in text
+
+    def test_indicator_appears_when_idle_exceeds_threshold(self):
+        log = ActivityLog()
+        log.set_session_active(True)
+        log.add_event(TextEvent(text="hello", is_thinking=False))
+        # Simulate 20 seconds of idle by backdating _last_event_at
+        log._last_event_at = time.monotonic() - 20
+        text = render_to_text(log.render(height=10))
+        assert "Processing" in text
+        assert "since last output" in text
+
+    def test_indicator_disappears_on_new_event(self):
+        log = ActivityLog()
+        log.set_session_active(True)
+        log.add_event(TextEvent(text="hello", is_thinking=False))
+        log._last_event_at = time.monotonic() - 20
+        # Indicator should be present
+        text = render_to_text(log.render(height=10))
+        assert "Processing" in text
+        # New event arrives — resets the timestamp
+        log.add_event(TextEvent(text="world", is_thinking=False))
+        text = render_to_text(log.render(height=10))
+        assert "Processing" not in text
+
+    def test_indicator_disappears_when_session_ends(self):
+        log = ActivityLog()
+        log.set_session_active(True)
+        log.add_event(TextEvent(text="hello", is_thinking=False))
+        log._last_event_at = time.monotonic() - 20
+        assert "Processing" in render_to_text(log.render(height=10))
+        # Session ends
+        log.set_session_active(False)
+        text = render_to_text(log.render(height=10))
+        assert "Processing" not in text
+
+    def test_set_session_active_initializes_timestamp(self):
+        log = ActivityLog()
+        assert log._last_event_at == 0
+        log.set_session_active(True)
+        assert log._last_event_at > 0
+
+    def test_indicator_shows_elapsed_time(self):
+        log = ActivityLog()
+        log.set_session_active(True)
+        log.add_event(TextEvent(text="hello", is_thinking=False))
+        log._last_event_at = time.monotonic() - 125  # 2m05s
+        text = render_to_text(log.render(height=10))
+        assert "2m05s" in text
+
+
 # --- Dashboard tests ---
 
 
@@ -425,6 +493,116 @@ class TestDashboard:
         text = render_to_text(dash.render())
         assert "Sprint:" in text
         assert "0/2 epics" in text
+
+    def test_multi_round_ds_cr_shows_all_rounds(self):
+        """Each DS/CR round should appear as its own line with r1/r2 labels."""
+        dash = Dashboard()
+        state = StoryState(story_key="1-1-auth", story_id="1.1")
+        state.current_step = StepKind.COMMIT
+        state.current_round = 2
+        state.step_results = [
+            StepResult(kind=StepKind.CS, story_key="1-1-auth", duration_ms=23000, num_turns=5, cost_usd=0.05, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-1-auth", duration_ms=120000, num_turns=12, cost_usd=0.20, success=True),
+            StepResult(kind=StepKind.CR, story_key="1-1-auth", duration_ms=50000, num_turns=6, cost_usd=0.10, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-1-auth", duration_ms=90000, num_turns=8, cost_usd=0.15, success=True),
+            StepResult(kind=StepKind.CR, story_key="1-1-auth", duration_ms=45000, num_turns=4, cost_usd=0.08, success=True),
+        ]
+        dash.update_state(story_state=state, story_number=1, step_elapsed=5.0, story_elapsed=400.0, total_elapsed=400.0, total_cost=0.58)
+        text = render_to_text(dash.render())
+        # CS appears once without round label
+        assert "CS" in text
+        # DS/CR appear with round labels
+        assert "DS r1" in text
+        assert "DS r2" in text
+        assert "CR r1" in text
+        assert "CR r2" in text
+        # Each round shows its own timing
+        assert "12 turns" in text  # DS r1
+        assert "8 turns" in text   # DS r2
+        assert "2m00s" in text     # DS r1 = 120s
+        assert "1m30s" in text     # DS r2 = 90s
+
+    def test_single_round_no_round_label(self):
+        """When DS/CR only run once, no round suffix should appear."""
+        dash = Dashboard()
+        state = StoryState(story_key="1-2-api", story_id="1.2")
+        state.current_step = StepKind.COMMIT
+        state.step_results = [
+            StepResult(kind=StepKind.CS, story_key="1-2-api", duration_ms=20000, num_turns=4, cost_usd=0.04, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-2-api", duration_ms=100000, num_turns=10, cost_usd=0.18, success=True),
+            StepResult(kind=StepKind.CR, story_key="1-2-api", duration_ms=40000, num_turns=5, cost_usd=0.07, success=True),
+        ]
+        dash.update_state(story_state=state, story_number=1, step_elapsed=0, story_elapsed=0, total_elapsed=0, total_cost=0.29)
+        text = render_to_text(dash.render())
+        assert "DS" in text
+        assert "DS r" not in text
+        assert "CR r" not in text
+
+    def test_active_step_during_second_round(self):
+        """Active DS in round 2 should show round label and live timer."""
+        dash = Dashboard()
+        state = StoryState(story_key="1-1-auth", story_id="1.1")
+        state.current_step = StepKind.DS
+        state.current_round = 2
+        state.step_results = [
+            StepResult(kind=StepKind.CS, story_key="1-1-auth", duration_ms=23000, num_turns=5, cost_usd=0.05, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-1-auth", duration_ms=120000, num_turns=12, cost_usd=0.20, success=True),
+            StepResult(kind=StepKind.CR, story_key="1-1-auth", duration_ms=50000, num_turns=6, cost_usd=0.10, success=True),
+        ]
+        dash.update_state(story_state=state, story_number=1, step_elapsed=45.0, story_elapsed=300.0, total_elapsed=300.0, total_cost=0.35)
+        text = render_to_text(dash.render())
+        # Completed DS r1 should be visible
+        assert "DS r1" in text
+        assert "12 turns" in text
+        # Active DS r2 with live timer
+        assert "DS r2" in text
+        assert "45s" in text
+
+    def test_pending_commit_after_multi_round(self):
+        """COMMIT should show as pending (○) when DS/CR rounds are in progress."""
+        dash = Dashboard()
+        state = StoryState(story_key="1-1-auth", story_id="1.1")
+        state.current_step = StepKind.CR
+        state.current_round = 2
+        state.step_results = [
+            StepResult(kind=StepKind.CS, story_key="1-1-auth", duration_ms=23000, num_turns=5, cost_usd=0.05, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-1-auth", duration_ms=120000, num_turns=12, cost_usd=0.20, success=True),
+            StepResult(kind=StepKind.CR, story_key="1-1-auth", duration_ms=50000, num_turns=6, cost_usd=0.10, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-1-auth", duration_ms=90000, num_turns=8, cost_usd=0.15, success=True),
+        ]
+        dash.update_state(story_state=state, story_number=1, step_elapsed=20.0, story_elapsed=400.0, total_elapsed=400.0, total_cost=0.50)
+        text = render_to_text(dash.render())
+        # CR r2 should be active
+        assert "CR r2" in text
+        # Commit should be pending with ○ marker
+        assert "○ Commit" in text
+
+    def test_initial_state_cs_active_rest_pending(self):
+        """At story start, CS should be active and DS/CR/COMMIT pending."""
+        dash = Dashboard()
+        state = StoryState(story_key="1-1-init", story_id="1.1")
+        state.current_step = StepKind.CS
+        dash.update_state(story_state=state, story_number=1, step_elapsed=10.0, story_elapsed=10.0, total_elapsed=10.0, total_cost=0)
+        text = render_to_text(dash.render())
+        assert "● CS" in text
+        assert "○ DS" in text
+        assert "○ CR" in text
+        assert "○ Commit" in text
+
+    def test_failed_step_shows_red_cross(self):
+        """A step result with success=False should display ✗ in red, not ✓ green."""
+        dash = Dashboard()
+        state = StoryState(story_key="1-1-fail", story_id="1.1")
+        state.current_step = StepKind.DS
+        state.current_round = 2
+        state.step_results = [
+            StepResult(kind=StepKind.CS, story_key="1-1-fail", duration_ms=20000, num_turns=4, cost_usd=0.04, success=True),
+            StepResult(kind=StepKind.DS, story_key="1-1-fail", duration_ms=60000, num_turns=8, cost_usd=0.12, success=False),
+        ]
+        dash.update_state(story_state=state, story_number=1, step_elapsed=0, story_elapsed=0, total_elapsed=0, total_cost=0.16)
+        text = render_to_text(dash.render())
+        assert "✗" in text
+        assert "✓ CS" in text
 
 
 # --- TUI integration ---
