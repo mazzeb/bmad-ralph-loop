@@ -68,12 +68,69 @@ class TestFormatElapsed:
 
 
 class TestActivityLog:
-    def test_tool_use_event(self):
+    def test_tool_use_event_hidden_by_default(self):
         log = ActivityLog()
+        log.add_event(ToolUseEvent(tool_name="Read", input_summary="/foo/bar.py"))
+        assert len(log._lines) == 1  # stored
+        text = render_to_text(log.render())
+        assert "Read" not in text  # but hidden in render
+
+    def test_tool_use_event_shown_when_enabled(self):
+        log = ActivityLog()
+        log.show_tools = True
         log.add_event(ToolUseEvent(tool_name="Read", input_summary="/foo/bar.py"))
         text = render_to_text(log.render())
         assert "Read" in text
         assert "/foo/bar.py" in text
+
+    def test_tool_use_toggle_at_runtime(self):
+        log = ActivityLog()
+        log.add_event(ToolUseEvent(tool_name="Read", input_summary="/foo/bar.py"))
+        log.add_event(TextEvent(text="Some output", is_thinking=False))
+        # Tools hidden by default
+        text = render_to_text(log.render())
+        assert "Read" not in text
+        assert "Some output" in text
+        # Toggle on
+        log.show_tools = True
+        text = render_to_text(log.render())
+        assert "Read" in text
+        assert "Some output" in text
+        # Toggle off again
+        log.show_tools = False
+        text = render_to_text(log.render())
+        assert "Read" not in text
+        assert "Some output" in text
+
+    def test_tool_use_new_lines_counter_excludes_hidden(self):
+        log = ActivityLog()
+        for i in range(10):
+            log.add_event(TextEvent(text=f"line {i}", is_thinking=False))
+        log.scroll_up()
+        # Add a mix of tool and non-tool events while scrolled
+        log.add_event(ToolUseEvent(tool_name="Read", input_summary="/a.py"))
+        log.add_event(TextEvent(text="visible", is_thinking=False))
+        log.add_event(ToolUseEvent(tool_name="Write", input_summary="/b.py"))
+        # Only the text event should count (tools hidden by default)
+        assert log._new_lines_since_pause == 1
+
+    def test_toggle_resets_scroll_to_bottom(self):
+        log = ActivityLog()
+        for i in range(50):
+            log.add_event(TextEvent(text=f"line {i}", is_thinking=False))
+        log.scroll_up(lines=20)
+        assert log.auto_scroll is False
+        assert log.scroll_offset > 0
+        # Toggling should snap to bottom
+        log.show_tools = True
+        assert log.auto_scroll is True
+        assert log.scroll_offset == 0
+
+    def test_constructor_accepts_show_tools(self):
+        log = ActivityLog(show_tools=True)
+        assert log.show_tools is True
+        log2 = ActivityLog(show_tools=False)
+        assert log2.show_tools is False
 
     def test_tool_result_skipped(self):
         log = ActivityLog()
@@ -396,6 +453,14 @@ class TestTUI:
         tui.handle_event(TextEvent(text="hello", is_thinking=False))
         assert len(tui.activity_log._lines) == 1
 
+    def test_show_tools_default_off(self):
+        tui = TUI()
+        assert tui.activity_log.show_tools is False
+
+    def test_show_tools_from_constructor(self):
+        tui = TUI(show_tools=True)
+        assert tui.activity_log.show_tools is True
+
 
 # --- StoryRunnerApp finished behavior ---
 
@@ -439,3 +504,36 @@ class TestStoryRunnerAppFinished:
         app = self._make_app()
         actions = [b.action for b in app.BINDINGS]
         assert "close_if_finished" in actions
+
+    def test_toggle_tools_binding_exists(self):
+        app = self._make_app()
+        actions = [b.action for b in app.BINDINGS]
+        assert "toggle_tools" in actions
+
+    def test_toggle_tools_action_flips_flag(self):
+        app = self._make_app()
+        assert app._tui.activity_log.show_tools is False
+        # Mock query_one to avoid needing mounted widgets
+        mock_widget = type("W", (), {"refresh": lambda self: None})()
+        app.query_one = lambda cls: mock_widget
+        app.action_toggle_tools()
+        assert app._tui.activity_log.show_tools is True
+        app.action_toggle_tools()
+        assert app._tui.activity_log.show_tools is False
+
+
+# --- CLI parse_args ---
+
+
+class TestParseArgs:
+    def test_show_tools_flag(self):
+        from run_stories.cli import parse_args
+
+        config, _ = parse_args(["--show-tools"])
+        assert config.show_tools is True
+
+    def test_show_tools_default_off(self):
+        from run_stories.cli import parse_args
+
+        config, _ = parse_args([])
+        assert config.show_tools is False

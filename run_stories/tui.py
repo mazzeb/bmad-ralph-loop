@@ -63,25 +63,51 @@ _STEP_LABELS = {
 
 
 class ActivityLog:
-    """Manages a scrollable list of rendered one-liners."""
+    """Manages a scrollable list of rendered one-liners.
 
-    def __init__(self, max_lines: int = 2000) -> None:
-        self._lines: list[Text] = []
+    Note: ``show_tools`` filters at render-time (not storage-time) so tool
+    events can be toggled on/off at runtime.  This differs from
+    ``show_thinking`` which filters at storage-time in ``_render_event``.
+    """
+
+    def __init__(self, max_lines: int = 2000, show_tools: bool = False) -> None:
+        self._lines: list[tuple[Text, bool]] = []  # (rendered_text, is_tool_use)
         self._max_lines = max_lines
         self.auto_scroll = True
         self.scroll_offset = 0  # lines from bottom
         self._new_lines_since_pause: int = 0
+        self._show_tools: bool = show_tools
+        self._visible_cache: list[Text] | None = None
+
+    @property
+    def show_tools(self) -> bool:
+        return self._show_tools
+
+    @show_tools.setter
+    def show_tools(self, value: bool) -> None:
+        if value != self._show_tools:
+            self._show_tools = value
+            self._visible_cache = None
+            # Snap to bottom on toggle to avoid disorienting scroll jumps
+            self.scroll_offset = 0
+            self.auto_scroll = True
+            self._new_lines_since_pause = 0
 
     def add_event(self, event: StreamEvent, show_thinking: bool = False) -> None:
         line = self._render_event(event, show_thinking)
         if line is not None:
-            self._lines.append(line)
+            is_tool = isinstance(event, ToolUseEvent)
+            self._lines.append((line, is_tool))
+            self._visible_cache = None
             if len(self._lines) > self._max_lines:
                 self._lines = self._lines[-self._max_lines:]
+                self._visible_cache = None
             if self.auto_scroll:
                 self.scroll_offset = 0
             else:
-                self._new_lines_since_pause += 1
+                # Only count visible events for the "new lines" indicator
+                if self._show_tools or not is_tool:
+                    self._new_lines_since_pause += 1
 
     def _render_event(self, event: StreamEvent, show_thinking: bool) -> Text | None:
         _kw = {"no_wrap": True, "overflow": "ellipsis"}
@@ -125,21 +151,36 @@ class ActivityLog:
                 return None
         return None
 
+    def _visible_lines(self) -> list[Text]:
+        """Return lines filtered by current show_tools setting (cached)."""
+        if self._visible_cache is not None:
+            return self._visible_cache
+        if self._show_tools:
+            result = [text for text, _ in self._lines]
+        else:
+            result = [text for text, is_tool in self._lines if not is_tool]
+        self._visible_cache = result
+        return result
+
     def render(self, height: int = 30) -> RenderableType:
         if not self._lines:
+            return Text("Waiting for events...", style="dim italic")
+
+        lines = self._visible_lines()
+        if not lines:
             return Text("Waiting for events...", style="dim italic")
 
         show_indicator = not self.auto_scroll and self._new_lines_since_pause > 0
         content_height = height - 1 if show_indicator else height
 
         # Clamp scroll_offset so we never scroll past the first line
-        max_offset = max(0, len(self._lines) - content_height)
+        max_offset = max(0, len(lines) - content_height)
         self.scroll_offset = min(self.scroll_offset, max_offset)
 
-        end = len(self._lines) - self.scroll_offset
+        end = len(lines) - self.scroll_offset
         start = max(0, end - content_height)
         end = max(start, end)
-        visible = list(self._lines[start:end])
+        visible = list(lines[start:end])
 
         if show_indicator:
             visible.append(Text(f"▼ {self._new_lines_since_pause} new lines", style="bold yellow"))
@@ -149,7 +190,7 @@ class ActivityLog:
     def scroll_up(self, lines: int = 3) -> None:
         self.auto_scroll = False
         # Soft cap: render() does the real clamping based on visible height
-        max_offset = max(0, len(self._lines) - 1)
+        max_offset = max(0, len(self._visible_lines()) - 1)
         self.scroll_offset = min(self.scroll_offset + lines, max_offset)
 
     def scroll_down(self, lines: int = 3) -> None:
@@ -309,8 +350,8 @@ class Dashboard:
 class TUI:
     """Top-level TUI data coordinator — dispatches events to ActivityLog and Dashboard."""
 
-    def __init__(self, show_thinking: bool = False) -> None:
-        self.activity_log = ActivityLog()
+    def __init__(self, show_thinking: bool = False, show_tools: bool = False) -> None:
+        self.activity_log = ActivityLog(show_tools=show_tools)
         self.dashboard = Dashboard()
         self.show_thinking = show_thinking
 
@@ -378,6 +419,7 @@ class StoryRunnerApp(App):
         Binding("pagedown", "scroll_activity(20)", "Page Down", show=False),
         Binding("up", "scroll_activity(-1)", "Up", show=False),
         Binding("down", "scroll_activity(1)", "Down", show=False),
+        Binding("t", "toggle_tools", "Toggle tools", show=False),
         Binding("q", "quit", "Quit", show=False),
         Binding("enter", "close_if_finished", "Close", show=False),
     ]
@@ -402,8 +444,10 @@ class StoryRunnerApp(App):
         activity_widget.refresh()
         # layout=True: height:auto needs a layout pass to resize when content changes
         self.query_one(DashboardWidget).refresh(layout=True)
-        # Update scroll indicator in border subtitle
+        # Update border title to reflect tools visibility
         log = activity_widget._log
+        activity_widget.border_title = "Activity Log [T]" if log.show_tools else "Activity Log"
+        # Update scroll indicator in border subtitle
         if not log.auto_scroll and log._new_lines_since_pause > 0:
             activity_widget.border_subtitle = f"▼ {log._new_lines_since_pause} new lines"
         else:
@@ -425,6 +469,10 @@ class StoryRunnerApp(App):
             self._finished = True
             self._tui.dashboard.freeze_timers()
             self._tui.dashboard.countdown_message = "Finished -- press Enter to close"
+
+    def action_toggle_tools(self) -> None:
+        self._tui.activity_log.show_tools = not self._tui.activity_log.show_tools
+        self.query_one(ActivityLogWidget).refresh()
 
     def action_close_if_finished(self) -> None:
         if self._finished:

@@ -602,7 +602,7 @@ class TestDryRunShowsResumeStep:
 
 def _tui_messages(tui: TUI) -> list[str]:
     """Extract text messages from TUI activity log lines."""
-    return [line.plain for line in tui.activity_log._lines]
+    return [text.plain for text, _is_tool in tui.activity_log._lines]
 
 
 class TestCSSessionErrorButStatusAdvanced:

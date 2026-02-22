@@ -138,6 +138,7 @@ class SessionConfig:
     review_model: str = ""
     dry_run: bool = False
     show_thinking: bool = False
+    show_tools: bool = False
     session_timeout_minutes: int = 30
     test_cmd: str = ""
 

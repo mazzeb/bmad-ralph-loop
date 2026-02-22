@@ -53,6 +53,10 @@ def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
         help="Display thinking blocks in the activity log",
     )
     parser.add_argument(
+        "--show-tools", action="store_true",
+        help="Display tool-use events in the activity log (toggleable at runtime with 't')",
+    )
+    parser.add_argument(
         "--session-timeout", type=int, default=30,
         help="Timeout in minutes for each Claude CLI session (default: 30)",
     )
@@ -76,6 +80,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
         review_model=args.review_model,
         dry_run=args.dry_run,
         show_thinking=args.show_thinking,
+        show_tools=args.show_tools,
         session_timeout_minutes=args.session_timeout,
         test_cmd=args.test_cmd,
     )
@@ -85,7 +90,7 @@ def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
 
 def _run(config: SessionConfig, show_thinking: bool) -> int:
     """Set up TUI, run Textual app with orchestrator, return exit code."""
-    tui = TUI(show_thinking=show_thinking)
+    tui = TUI(show_thinking=show_thinking, show_tools=config.show_tools)
     app = StoryRunnerApp(tui=tui, config=config)
     app.run()
     return getattr(app, '_exit_code', 1)
