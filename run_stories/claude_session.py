@@ -35,6 +35,7 @@ async def run_claude_session(
     project_dir: Path,
     step_kind: StepKind | None = None,
     story_key: str = "",
+    timeout_minutes: int = 30,
 ) -> StepResult:
     """Run a Claude CLI session with stream-json output.
 
@@ -70,25 +71,57 @@ async def run_claude_session(
     )
     _active_process = proc
 
+    timed_out = False
     try:
-        with open(log_file, "w", buffering=1) as log_fh:  # line-buffered
-            if proc.stdout is None:
-                raise RuntimeError("Failed to capture subprocess stdout")
-            async for raw_line in proc.stdout:
-                line = raw_line.decode("utf-8", errors="replace")
-                log_fh.write(line)
+        async def _stream_and_collect() -> int:
+            with open(log_file, "w", buffering=1) as log_fh:  # line-buffered
+                if proc.stdout is None:
+                    raise RuntimeError("Failed to capture subprocess stdout")
+                async for raw_line in proc.stdout:
+                    line = raw_line.decode("utf-8", errors="replace")
+                    log_fh.write(line)
 
-                events = parse_line(line)
-                for event in events:
-                    tui.handle_event(event)
-                    if isinstance(event, MarkerEvent):
-                        markers.append(event)
-                    elif isinstance(event, ResultEvent):
-                        result_event = event
+                    events = parse_line(line)
+                    for event in events:
+                        tui.handle_event(event)
+                        if isinstance(event, MarkerEvent):
+                            markers.append(event)
+                        elif isinstance(event, ResultEvent):
+                            nonlocal result_event
+                            result_event = event
 
-        exit_code = await proc.wait()
+            return await proc.wait()
+
+        timeout_secs = timeout_minutes * 60
+        try:
+            exit_code = await asyncio.wait_for(_stream_and_collect(), timeout=timeout_secs)
+        except asyncio.TimeoutError:
+            timed_out = True
+            from .models import TextEvent as _TE
+            tui.handle_event(_TE(
+                text=f"SESSION TIMEOUT: {timeout_minutes}m exceeded. Terminating subprocess.",
+                is_thinking=False,
+            ))
+            proc.terminate()
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            except asyncio.TimeoutError:
+                proc.kill()
+                await proc.wait()
+            exit_code = -1
     finally:
         _active_process = None
+
+    if timed_out:
+        return StepResult(
+            kind=step_kind or StepKind.CS,
+            story_key=story_key,
+            duration_ms=timeout_minutes * 60 * 1000,
+            num_turns=result_event.num_turns if result_event else 0,
+            cost_usd=result_event.cost_usd if result_event else None,
+            markers_detected=markers,
+            success=False,
+        )
 
     # Determine success: check both exit code and result event
     if result_event is not None:

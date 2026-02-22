@@ -86,6 +86,49 @@ async def _check_story_committed(project_dir: Path, story_key: str) -> bool:
         return False
 
 
+async def _run_test_gate(test_cmd: str, project_dir: Path, tui: TUI) -> bool:
+    """Run the project's test command and return True if tests pass.
+
+    Returns True (pass) if no test_cmd is configured.
+    """
+    if not test_cmd:
+        return True
+
+    tui.handle_event(TextEvent(
+        text=f"Running test gate: {test_cmd}",
+        is_thinking=False,
+    ))
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            test_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            cwd=project_dir,
+        )
+        stdout, _ = await proc.communicate()
+        passed = proc.returncode == 0
+        if not passed:
+            # Show last 20 lines of test output for diagnostics
+            output_lines = (stdout or b"").decode("utf-8", errors="replace").strip().splitlines()
+            tail = output_lines[-20:] if len(output_lines) > 20 else output_lines
+            tui.handle_event(TextEvent(
+                text=f"TEST GATE FAILED (exit {proc.returncode}):\n" + "\n".join(tail),
+                is_thinking=False,
+            ))
+        else:
+            tui.handle_event(TextEvent(
+                text="Test gate passed.",
+                is_thinking=False,
+            ))
+        return passed
+    except (OSError, FileNotFoundError) as exc:
+        tui.handle_event(TextEvent(
+            text=f"WARNING: Test gate command failed to execute: {exc}",
+            is_thinking=False,
+        ))
+        return False
+
+
 async def run_stories(config: SessionConfig, tui: TUI) -> int:
     """Run the main story loop. Returns the number of completed stories."""
 
@@ -229,6 +272,7 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                 project_dir=project_dir,
                 step_kind=StepKind.CS,
                 story_key=story_key,
+                timeout_minutes=config.session_timeout_minutes,
             )
             story_state.step_results.append(cs_result)
 
@@ -313,6 +357,7 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                     project_dir=project_dir,
                     step_kind=StepKind.DS,
                     story_key=story_key,
+                    timeout_minutes=config.session_timeout_minutes,
                 )
                 story_state.step_results.append(ds_result)
 
@@ -327,17 +372,17 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                 # dev-story work completed and status advanced.
                 status_data = await _load_status_safe(sprint_status_path)
                 status = get_story_status(status_data, story_key)
-                if status == "review":
-                    if not ds_result.success:
+                if status in ("review", "done"):
+                    if status == "done":
                         tui.handle_event(TextEvent(
-                            text=f"WARNING: DS session ended with error but story {story_key} progressed to review. Continuing. Log: {log_ds}",
+                            text=f"WARNING: Story {story_key} jumped to 'done' after DS. Forcing code review anyway.",
                             is_thinking=False,
                         ))
-                elif status == "done":
-                    tui.handle_event(TextEvent(
-                        text=f"WARNING: Story {story_key} jumped to 'done' after DS, skipping code review.",
-                        is_thinking=False,
-                    ))
+                    if not ds_result.success:
+                        tui.handle_event(TextEvent(
+                            text=f"WARNING: DS session ended with error but story {story_key} progressed to {status}. Continuing. Log: {log_ds}",
+                            is_thinking=False,
+                        ))
                 elif not ds_result.success:
                     tui.handle_event(TextEvent(text=f"ERROR: Dev Story failed (status: {status}). Check log: {log_ds}", is_thinking=False))
                     break
@@ -347,6 +392,26 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                         is_thinking=False,
                     ))
                     break
+
+            # --- Test gate: verify tests pass before CR ---
+            if not (skip_first_ds and round_num == start_round):
+                if not await _run_test_gate(config.test_cmd, project_dir, tui):
+                    tui.handle_event(TextEvent(
+                        text=f"Test gate failed after DS for {story_key}. Skipping CR, treating as rejection.",
+                        is_thinking=False,
+                    ))
+                    if round_num < config.max_review_rounds:
+                        tui.handle_event(TextEvent(
+                            text=f"Running dev-story again (round {round_num + 1}) to fix test failures...",
+                            is_thinking=False,
+                        ))
+                        continue
+                    else:
+                        tui.handle_event(TextEvent(
+                            text=f"WARNING: Max review rounds ({config.max_review_rounds}) reached with failing tests.",
+                            is_thinking=False,
+                        ))
+                        break
 
             # --- Code Review (CR) ---
             story_state.current_step = StepKind.CR
@@ -370,6 +435,7 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                 project_dir=project_dir,
                 step_kind=StepKind.CR,
                 story_key=story_key,
+                timeout_minutes=config.session_timeout_minutes,
             )
             story_state.step_results.append(cr_result)
 
@@ -418,7 +484,21 @@ async def run_stories(config: SessionConfig, tui: TUI) -> int:
                 tui=tui,
             )
             story_state.step_results.append(commit_result)
-            story_count += 1
+
+            # Post-commit verification: confirm the commit actually landed in git
+            if commit_result.success:
+                if await _check_story_committed(project_dir, story_key):
+                    story_count += 1
+                else:
+                    tui.handle_event(TextEvent(
+                        text=f"ERROR: Commit session reported success but story {story_key} not found in git log. Story NOT counted as completed.",
+                        is_thinking=False,
+                    ))
+            else:
+                tui.handle_event(TextEvent(
+                    text=f"ERROR: Commit failed for story {story_key}. Story NOT counted as completed.",
+                    is_thinking=False,
+                ))
             _refresh_sprint_stats(sprint_status_path, tui)
         else:
             status_data = load_status(sprint_status_path)

@@ -84,6 +84,8 @@ def _update_status(path: Path, old: str, new: str):
 
 # Shorthand for the git-dirty mock used by all tests with done stories in fixture
 _PATCH_GIT_CLEAN = patch("run_stories.orchestrator._check_git_dirty", return_value=False, new_callable=AsyncMock)
+# Shorthand: post-commit verification always succeeds (no real git repo in tests)
+_PATCH_COMMIT_VERIFIED = patch("run_stories.orchestrator._check_story_committed", return_value=True, new_callable=AsyncMock)
 
 
 class TestHappyPath:
@@ -124,7 +126,7 @@ class TestHappyPath:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -173,7 +175,7 @@ class TestCRRejectionLoop:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -209,7 +211,7 @@ class TestHaltDuringDS:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 0
@@ -273,7 +275,7 @@ class TestMaxReviewRoundsExhausted:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         # Story not completed due to max rounds
@@ -333,7 +335,7 @@ class TestResumeFromReadyForDev:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -375,7 +377,7 @@ class TestResumeFromReview:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -418,7 +420,7 @@ class TestResumeFromInProgress:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -461,10 +463,18 @@ class TestCommitGapRecovery:
             commit_keys.append(kwargs.get("story_key"))
             return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
 
+        # First call: recovery detection returns False (uncommitted), subsequent: True (verified)
+        commit_check_calls = {"count": 0}
+
+        async def mock_check_committed(project_dir, story_key):
+            commit_check_calls["count"] += 1
+            # First call is recovery detection — return False to trigger recovery
+            return commit_check_calls["count"] > 1
+
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
              patch("run_stories.orchestrator._check_git_dirty", return_value=True, new_callable=AsyncMock), \
-             patch("run_stories.orchestrator._check_story_committed", return_value=False, new_callable=AsyncMock):
+             patch("run_stories.orchestrator._check_story_committed", side_effect=mock_check_committed):
             count = await run_stories(config, tui)
 
         # First commit is recovery for 1-1-alpha, second is for 1-2-beta
@@ -508,7 +518,7 @@ class TestCleanDoneNoRecovery:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         # No recovery commit — only the main-loop commit for 1-2-beta
@@ -552,7 +562,7 @@ class TestStoryFileMissing:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         # CS should be called because story file was missing
@@ -634,7 +644,7 @@ class TestCSSessionErrorButStatusAdvanced:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -685,7 +695,7 @@ class TestDSSessionErrorButStatusAdvanced:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -723,7 +733,7 @@ class TestCSGenuineFailure:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 0
@@ -764,7 +774,7 @@ class TestDSGenuineFailure:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 0
@@ -808,7 +818,7 @@ class TestHaltWithAdvancedStatus:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 0
@@ -853,7 +863,7 @@ class TestCRSessionErrorButStatusDone:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -905,7 +915,7 @@ class TestCRSessionErrorStatusNotDone:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 1
@@ -937,7 +947,7 @@ class TestDSUnexpectedStatusBreaks:
 
         with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
              patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
-             _PATCH_GIT_CLEAN:
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
             count = await run_stories(config, tui)
 
         assert count == 0
@@ -989,3 +999,303 @@ class TestLoadStatusSafe:
              patch("run_stories.orchestrator._STATUS_RETRY_DELAY", 0):
             with pytest.raises(ValueError, match="Corrupt YAML"):
                 await _load_status_safe(path)
+
+
+# ---- Hardening measure tests ----
+
+
+class TestTestGatePass:
+    """Test gate passes → proceeds to CR normally."""
+
+    @pytest.mark.asyncio
+    async def test_test_gate_passes(self, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        config = SessionConfig(
+            project_dir=tmp_project,
+            max_stories=1,
+            max_turns_cs=10,
+            max_turns_ds=10,
+            max_turns_cr=10,
+            test_cmd="true",  # always passes
+        )
+        steps_called = []
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            steps_called.append(step_kind)
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        assert StepKind.CR in steps_called
+        messages = _tui_messages(tui)
+        assert any("Test gate passed" in m for m in messages)
+
+
+class TestTestGateFails:
+    """Test gate fails → CR skipped, DS retried."""
+
+    @pytest.mark.asyncio
+    async def test_test_gate_fails_triggers_retry(self, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        config = SessionConfig(
+            project_dir=tmp_project,
+            max_stories=1,
+            max_turns_cs=10,
+            max_turns_ds=10,
+            max_turns_cr=10,
+            max_review_rounds=2,
+            test_cmd="false",  # always fails
+        )
+        ds_count = 0
+
+        async def mock_run_session(**kwargs):
+            nonlocal ds_count
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                ds_count += 1
+                content = sprint_status.read_text()
+                if "ready-for-dev" in content:
+                    _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                elif "in-progress" in content:
+                    _update_status(sprint_status, "1-2-next-story: in-progress", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
+            count = await run_stories(config, tui)
+
+        # Story not completed because tests always fail
+        assert count == 0
+        # DS ran twice (max_review_rounds=2)
+        assert ds_count == 2
+        messages = _tui_messages(tui)
+        assert any("TEST GATE FAILED" in m for m in messages)
+
+
+class TestTestGateNoCmd:
+    """No test_cmd configured → test gate skipped, CR runs normally."""
+
+    @pytest.mark.asyncio
+    async def test_no_test_cmd_skips_gate(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+        steps_called = []
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            steps_called.append(step_kind)
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        assert StepKind.CR in steps_called
+        # No "Test gate" messages since no test_cmd configured
+        messages = _tui_messages(tui)
+        assert not any("Test gate" in m for m in messages)
+
+
+class TestPostCommitVerificationFails:
+    """Commit session succeeds but git log doesn't show the commit → story not counted."""
+
+    @pytest.mark.asyncio
+    async def test_commit_not_in_git(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, \
+             patch("run_stories.orchestrator._check_story_committed", return_value=False, new_callable=AsyncMock):
+            count = await run_stories(config, tui)
+
+        assert count == 0
+        messages = _tui_messages(tui)
+        assert any("not found in git log" in m for m in messages)
+
+
+class TestCommitSessionFails:
+    """Commit session returns success=False → story not counted."""
+
+    @pytest.mark.asyncio
+    async def test_commit_failure_not_counted(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return StepResult(
+                kind=StepKind.COMMIT,
+                story_key=kwargs.get("story_key", ""),
+                success=False,
+            )
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
+            count = await run_stories(config, tui)
+
+        assert count == 0
+        messages = _tui_messages(tui)
+        assert any("Commit failed" in m for m in messages)
+
+
+class TestDoneSkipForcedCR:
+    """DS sets status to 'done' → CR still runs (not skipped)."""
+
+    @pytest.mark.asyncio
+    async def test_cr_forced_after_ds_done(self, config, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+        steps_called = []
+
+        async def mock_run_session(**kwargs):
+            step_kind = kwargs.get("step_kind")
+            steps_called.append(step_kind)
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                # DS unexpectedly sets status to done
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: done")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                # CR approves (status already done)
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        # CR must have been called even though DS set done
+        assert StepKind.CR in steps_called
+        messages = _tui_messages(tui)
+        assert any("jumped to 'done'" in m and "Forcing code review" in m for m in messages)
+
+
+class TestSessionTimeout:
+    """Verify timeout_minutes parameter is passed to run_claude_session."""
+
+    @pytest.mark.asyncio
+    async def test_timeout_passed_to_session(self, tui, tmp_project):
+        sprint_status = tmp_project / "_bmad-output" / "implementation-artifacts" / "sprint-status.yaml"
+        story_file = tmp_project / "_bmad-output" / "implementation-artifacts" / "1-2-next-story.md"
+
+        config = SessionConfig(
+            project_dir=tmp_project,
+            max_stories=1,
+            session_timeout_minutes=45,
+        )
+        timeout_values = []
+
+        async def mock_run_session(**kwargs):
+            timeout_values.append(kwargs.get("timeout_minutes"))
+            step_kind = kwargs.get("step_kind")
+            if step_kind == StepKind.CS:
+                _update_status(sprint_status, "1-2-next-story: backlog", "1-2-next-story: ready-for-dev")
+                story_file.write_text("# Story 1.2")
+                return _make_step_result(StepKind.CS, "1-2-next-story")
+            elif step_kind == StepKind.DS:
+                _update_status(sprint_status, "1-2-next-story: ready-for-dev", "1-2-next-story: review")
+                return _make_step_result(StepKind.DS, "1-2-next-story")
+            elif step_kind == StepKind.CR:
+                _update_status(sprint_status, "1-2-next-story: review", "1-2-next-story: done")
+                return _make_step_result(StepKind.CR, "1-2-next-story")
+            return _make_step_result(step_kind or StepKind.CS, kwargs.get("story_key", ""))
+
+        async def mock_commit_session(**kwargs):
+            return _make_step_result(StepKind.COMMIT, kwargs.get("story_key", ""))
+
+        with patch("run_stories.orchestrator.run_claude_session", side_effect=mock_run_session), \
+             patch("run_stories.orchestrator.run_commit_session", side_effect=mock_commit_session), \
+             _PATCH_GIT_CLEAN, _PATCH_COMMIT_VERIFIED:
+            count = await run_stories(config, tui)
+
+        assert count == 1
+        # All 3 sessions (CS, DS, CR) should have received the timeout
+        assert all(t == 45 for t in timeout_values)
+        assert len(timeout_values) == 3

@@ -52,6 +52,14 @@ def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
         "--show-thinking", action="store_true",
         help="Display thinking blocks in the activity log",
     )
+    parser.add_argument(
+        "--session-timeout", type=int, default=30,
+        help="Timeout in minutes for each Claude CLI session (default: 30)",
+    )
+    parser.add_argument(
+        "--test-cmd", default="",
+        help="Test command to run after dev-story for verification (e.g. 'pytest tests/ -v')",
+    )
 
     args = parser.parse_args(argv)
 
@@ -68,6 +76,8 @@ def parse_args(argv: list[str] | None = None) -> tuple[SessionConfig, bool]:
         review_model=args.review_model,
         dry_run=args.dry_run,
         show_thinking=args.show_thinking,
+        session_timeout_minutes=args.session_timeout,
+        test_cmd=args.test_cmd,
     )
 
     return config, args.show_thinking

@@ -14,9 +14,25 @@ You are executing the BMAD code-review workflow in fully autonomous YOLO mode. N
 
 - For ALL `<ask>` tags: simulate an expert user choosing the optimal option. Never wait for input.
 - **CRITICAL**: When presenting review findings and asking what to do, ALWAYS choose option **1 (Fix them automatically)**. Fix ALL HIGH and MEDIUM issues directly in the code.
-- After fixing, update the story status appropriately:
-  - If all HIGH and MEDIUM issues are fixed AND all ACs implemented → status `done`
-  - If issues remain that could not be fixed → status `in-progress`
+- **MANDATORY POST-FIX TEST RE-RUN**: After fixing ANY code or tests, you MUST re-run the full test suite before marking the story status. This catches regressions introduced by your fixes. If tests fail after your fixes, keep status as `in-progress`.
+- After fixing and verifying tests pass, update the story status appropriately:
+  - If all HIGH and MEDIUM issues are fixed AND all ACs implemented AND all tests pass → status `done`
+  - If issues remain that could not be fixed OR tests fail → status `in-progress`
+
+## Structured Acceptance Criteria Validation
+
+Before setting the final status, you MUST perform structured AC validation:
+
+1. **Extract** all acceptance criteria from the story file. List them as a numbered checklist.
+2. **Verify each AC individually** by searching the implementation code for concrete evidence.
+3. **Assign a verdict** to each AC: `PASS` (implemented and verified) or `FAIL` (missing or incomplete).
+4. **Output the AC checklist** in your review with verdicts, e.g.:
+   ```
+   AC Validation:
+   1. [PASS] User can log in with email and password — verified in auth.py:45
+   2. [FAIL] Error message shown on invalid credentials — no error handling found
+   ```
+5. **ALL ACs must PASS** before status can be set to `done`. Any `FAIL` → status `in-progress`.
 
 ## Autonomous Constraints
 
