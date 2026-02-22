@@ -4,5 +4,5 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ -d "$SCRIPT_DIR/.run-stories" ]]; then
   exec uv run --project "$SCRIPT_DIR/.run-stories" run-stories "$@"
 else
-  exec uv run run-stories "$@"
+  exec uv run --project "$SCRIPT_DIR" run-stories "$@"
 fi
