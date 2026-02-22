@@ -240,6 +240,37 @@ class TestScrollBehavior:
         text = render_to_text(log.render(height=10))
         assert "new lines" not in text
 
+    def test_scroll_up_fewer_lines_than_height_is_noop(self):
+        """Regression: scrolling up when all lines fit on screen should not remove lines."""
+        log = ActivityLog()
+        for i in range(10):
+            log.add_event(TextEvent(text=f"line-{i:03d}", is_thinking=False))
+        # Screen height larger than content — all 10 lines visible
+        text_before = render_to_text(log.render(height=30))
+        assert "line-000" in text_before
+        assert "line-009" in text_before
+        # Scroll up repeatedly
+        for _ in range(10):
+            log.scroll_up(lines=3)
+        text_after = render_to_text(log.render(height=30))
+        # All lines should still be visible
+        assert "line-000" in text_after
+        assert "line-009" in text_after
+
+    def test_scroll_up_stops_at_first_line(self):
+        """Scrolling up with many lines stops when first line reaches top."""
+        log = ActivityLog()
+        for i in range(100):
+            log.add_event(TextEvent(text=f"line-{i:03d}", is_thinking=False))
+        # Scroll all the way up
+        for _ in range(50):
+            log.scroll_up(lines=10)
+        text = render_to_text(log.render(height=20))
+        # First line must be visible
+        assert "line-000" in text
+        # Should show exactly 20 lines (height worth)
+        assert "line-019" in text
+
 
 # --- Dashboard tests ---
 

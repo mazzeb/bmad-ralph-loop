@@ -132,6 +132,10 @@ class ActivityLog:
         show_indicator = not self.auto_scroll and self._new_lines_since_pause > 0
         content_height = height - 1 if show_indicator else height
 
+        # Clamp scroll_offset so we never scroll past the first line
+        max_offset = max(0, len(self._lines) - content_height)
+        self.scroll_offset = min(self.scroll_offset, max_offset)
+
         end = len(self._lines) - self.scroll_offset
         start = max(0, end - content_height)
         end = max(start, end)
@@ -144,7 +148,8 @@ class ActivityLog:
 
     def scroll_up(self, lines: int = 3) -> None:
         self.auto_scroll = False
-        max_offset = max(0, len(self._lines) - 5)
+        # Soft cap: render() does the real clamping based on visible height
+        max_offset = max(0, len(self._lines) - 1)
         self.scroll_offset = min(self.scroll_offset + lines, max_offset)
 
     def scroll_down(self, lines: int = 3) -> None:
