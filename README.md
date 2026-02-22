@@ -50,8 +50,8 @@ git clone <this-repo> bmad-ralph-loop
 ```
 
 The install script copies everything needed into your project root:
-- `run_stories/` Python package (includes prompt templates)
-- `pyproject.toml` and `run-stories` wrapper script
+- `.run-stories/` — contains the `run_stories` package and `pyproject.toml`
+- `run-stories` — wrapper script in your project root
 
 ### Option B: Standalone
 
@@ -61,8 +61,6 @@ Use the repo directly — run everything from within the cloned directory. Paths
 cd /path/to/bmad-ralph-loop
 ./run-stories --help
 ```
-
-> **Migrating from `run-stories.sh`?** The old bash script has been replaced by a Python package. Use `./run-stories` instead of `./run-stories.sh`. All CLI flags are the same.
 
 ## Usage
 
@@ -86,11 +84,16 @@ Run from your project root (where `sprint-status.yaml` and `_bmad-output/` live)
 
 | Flag | Default | Description |
 |---|---|---|
-| `--max-stories N` | unlimited | Stop after N stories |
+| `--max-stories N` | 999 | Stop after N stories |
+| `--max-turns-cs N` | 100 | Max turns for create-story sessions |
 | `--max-turns-ds N` | 200 | Max turns for dev-story sessions |
+| `--max-turns-cr N` | 150 | Max turns for code-review sessions |
 | `--max-review-rounds N` | 3 | Max dev->review fix rounds per story |
 | `--dev-model MODEL` | system default | Model for create-story and dev-story |
 | `--review-model MODEL` | system default | Model for code review (different model recommended) |
+| `--session-timeout N` | 30 | Timeout (minutes) per Claude CLI session; kills the session on expiry |
+| `--test-cmd CMD` | — | Test command run after dev-story (e.g. `'pytest tests/ -v'`); non-zero exit fails the step |
+| `--show-thinking` | off | Display thinking blocks in the activity log |
 | `--dry-run` | off | Show plan without executing |
 
 ## How It Works
